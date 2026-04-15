@@ -1,0 +1,20 @@
+# Rust build outputs
+/target/
+/target_build/
+
+# Local release artifacts
+/dist/
+*.exe
+*.pdb
+
+# Logs and temp files
+*.log
+*.tmp
+
+# IDE/editor files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

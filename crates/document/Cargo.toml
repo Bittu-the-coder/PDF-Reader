@@ -1,0 +1,11 @@
+[package]
+name = "the-reader-document"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pdfium-render = { workspace = true }
+image = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+parking_lot = { workspace = true }

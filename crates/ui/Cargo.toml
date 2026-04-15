@@ -1,0 +1,15 @@
+[package]
+name = "the-reader-ui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+the-reader-document = { path = "../document" }
+the-reader-renderer = { path = "../renderer" }
+the-reader-settings = { path = "../settings" }
+gpui = { workspace = true }
+image = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+parking_lot = { workspace = true }
+rfd = { workspace = true }
