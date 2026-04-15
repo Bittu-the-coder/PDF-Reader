@@ -1,78 +1,42 @@
-# Antigravity — PDF Reader for Windows
+# The Reader
 
-> "Read without the weight."
-
-A native Windows PDF reader written in Rust using the GPUI framework (from Zed editor). Built for people who read a lot of PDFs and are tired of bloated, ugly, RAM-hungry readers.
+A Tauri-based Windows PDF reader with a dark-first interface, one-page-at-a-time rendering, and low-RAM behavior.
 
 ## Features
 
-- **True Dark Mode** — Works on text, scanned, and image-based PDFs using intelligent luminance-aware color inversion
-- **Ultra-Low RAM** — Targets under 80MB for a 200-page document  
-- **Premium Dark UI** — Inspired by Linear.app and Arc browser aesthetics
-- **Fast Rendering** — GPU-accelerated via GPUI, with page caching
-- **Keyboard-First** — Full keyboard navigation and shortcuts
+- Open PDFs by button or drag-and-drop
+- Next / previous page navigation
+- Page jump input
+- Zoom in / out and fit-width behavior
+- Dark mode profiles:
+  - Dark
+  - Sepia Dark
+  - High Contrast
+  - Original
+- Single-page render pipeline to keep memory use low
 
-## Dark Mode Profiles
+## How to test
 
-| Profile | Description |
-|---------|-------------|
-| **Dark** | Full dark background with adjusted text — default |
-| **Sepia Dark** | Warm dark tone, easy on eyes for long reading |
-| **High Contrast** | Pure black bg, pure white text, max accessibility |
-| **Original** | No processing, as-is rendering |
+### Development
 
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `Ctrl+O` | Open file |
-| `Ctrl+D` | Cycle dark mode |
-| `Ctrl+T` | Toggle thumbnails |
-| `Ctrl+=` | Zoom in |
-| `Ctrl+-` | Zoom out |
-| `→` / `↓` / `Space` | Next page |
-| `←` / `↑` | Previous page |
-| `Home` | First page |
-| `End` | Last page |
-
-## Tech Stack
-
-| Layer | Choice |
-|-------|--------|
-| Language | Rust |
-| UI Framework | GPUI (Zed's framework) |
-| PDF Rendering | pdfium-render |
-| Dark Mode Engine | Custom luminance-aware inversion |
-| Config | serde + TOML |
-
-## Building
-
-```bash
-# Prerequisites: Rust toolchain, PDFium library on system PATH
-cargo build --release
-
-# Run with a specific PDF
-cargo run -- path/to/document.pdf
+```powershell
+npm install
+npm run tauri:dev
 ```
 
-### PDFium Setup
+### Production build
 
-Antigravity uses PDFium for PDF rendering. You need to have the PDFium dynamic library available:
-
-1. Download PDFium from [pdfium-binaries](https://github.com/nicktamura/pdfium-binaries/releases)
-2. Place `pdfium.dll` in the same directory as the executable, or in your system PATH
-
-## Project Structure
-
-```
-crates/
-├── app/        — Main entry point, window management, GPUI app loop
-├── document/   — PDF loading, parsing, text extraction, bookmarks
-├── renderer/   — Dark mode engine, page rendering pipeline, LRU cache
-├── ui/         — All GPUI UI components (views, title bar, status bar)
-└── settings/   — User config persistence (TOML), theme definitions
+```powershell
+npm run tauri:build
 ```
 
-## License
+Installer outputs are written to:
 
-MIT
+- `src-tauri/target/release/bundle/nsis/The Reader_0.1.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/The Reader_0.1.0_x64_en-US.msi`
+
+## Notes
+
+- The app uses PDF.js for rendering one page at a time.
+- Dark mode is applied after rendering so scanned, image-based, and mixed PDFs are all processed consistently.
+- This keeps memory use much lower than loading whole-document bitmaps.

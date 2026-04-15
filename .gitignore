@@ -1,20 +1,15 @@
-# Rust build outputs
+# Node / Tauri / Rust build outputs
+node_modules/
+dist/
+/src-tauri/target/
 /target/
 /target_build/
 
-# Local release artifacts
-/dist/
-*.exe
-*.pdb
+# Tauri bundle artifacts
+src-tauri/gen/
 
-# Logs and temp files
-*.log
-*.tmp
-
-# IDE/editor files
-.vscode/
-.idea/
-
-# OS files
+# OS / editor
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
