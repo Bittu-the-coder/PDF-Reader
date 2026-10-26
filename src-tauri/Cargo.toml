@@ -1,11 +1,63 @@
 [package]
-name = "the-reader"
+name = "shelf"
 version = "0.1.0"
-edition = "2021"
-build = "build.rs"
+description = "A minimal, memory-first PDF reader"
+authors = ["you"]
+edition = "2024"
+
+[lib]
+name = "shelf_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.0.0", features = [] }
+tauri-build = { version = "2", features = [] }
+
+[features]
+default = ["desktop"]
+desktop = ["dep:tauri", "dep:tauri-plugin-opener", "dep:tauri-plugin-dialog", "dep:tauri-plugin-fs"]
 
 [dependencies]
-tauri = { version = "2.0.0", features = [] }
+tauri = { version = "2", optional = true , features = [] }
+tauri-plugin-opener = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-fs = { version = "2", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Database
+rusqlite = { version = "0.33", features = ["bundled"] }
+
+# Async runtime + HTTP
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Secret storage
+keyring = { version = "3", features = ["linux-native"] }
+
+# Audio
+rodio = "0.20"
+
+# Hashing (for file SHA-256)
+sha2 = "0.10"
+
+# Chrono for timestamps
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

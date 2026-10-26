@@ -1,0 +1,36 @@
+/* PDF.js Text Layer styling for native text selection and highlights */
+.textLayer {
+  position: absolute;
+  text-align: initial;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+/* Selected text background matching app accent */
+.textLayer ::selection {
+  background: var(--accent-subtle, rgba(99, 102, 241, 0.35));
+  color: transparent;
+}
+
+/* When in sepia mode, warm selection */
+[data-theme="sepia"] .textLayer ::selection {
+  background: rgba(180, 83, 9, 0.28);
+}

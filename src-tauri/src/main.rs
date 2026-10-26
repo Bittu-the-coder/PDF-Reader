@@ -1,13 +1,10 @@
-use tauri::Manager;
+// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(feature = "desktop")]
 fn main() {
-    tauri::Builder::default()
-        .setup(|app| {
-            if let Some(window) = app.get_webview_window("main") {
-                window.set_title("The Reader").ok();
-            }
-            Ok(())
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running the app");
+    shelf_lib::run();
 }
+
+#[cfg(not(feature = "desktop"))]
+fn main() {}
