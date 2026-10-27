@@ -49,6 +49,7 @@ export interface Word {
   chapter_id: number | null;
   word: string;
   meaning: string;
+  meaning_hindi?: string | null;
   example_sentence: string | null;
   page: number | null;
   ai_generated: boolean;
@@ -75,6 +76,17 @@ export interface Highlight {
   rects_json: string;
   note_id: number | null;
   created_at: string;
+}
+
+export interface WordLookupResult {
+  word: string;
+  part_of_speech?: string | null;
+  meaning: string;
+  meaning_hindi?: string | null;
+  meaning_in_context?: string | null;
+  example?: string | null;
+  synonyms?: string[] | null;
+  pronunciation?: string | null;
 }
 
 // Typed API functions wrapping Tauri invoke
@@ -170,6 +182,7 @@ export const api = {
     chapterId?: number | null;
     word: string;
     meaning: string;
+    meaningHindi?: string | null;
     exampleSentence?: string | null;
     page?: number | null;
     aiGenerated?: boolean | null;
@@ -181,8 +194,18 @@ export const api = {
   findWord: (bookId: number, word: string) =>
     invoke<Word | null>("find_word", { bookId, word }),
 
-  updateWord: (id: number, meaning: string, exampleSentence?: string | null) =>
-    invoke<void>("update_word", { id, meaning, exampleSentence: exampleSentence ?? null }),
+  updateWord: (
+    id: number,
+    meaning: string,
+    meaningHindi?: string | null,
+    exampleSentence?: string | null
+  ) =>
+    invoke<void>("update_word", {
+      id,
+      meaning,
+      meaningHindi: meaningHindi ?? null,
+      exampleSentence: exampleSentence ?? null,
+    }),
 
   deleteWord: (id: number) => invoke<void>("delete_word", { id }),
 
@@ -219,14 +242,70 @@ export const api = {
   deleteHighlight: (id: number) => invoke<void>("delete_highlight", { id }),
 
   // Settings & Secrets
-  setApiKey: (key: string) => invoke<void>("set_api_key", { key }),
+  setApiKey: (key: string, provider?: string) =>
+    invoke<void>("set_api_key", { key, provider: provider ?? null }),
 
-  hasApiKey: () => invoke<boolean>("has_api_key"),
+  hasApiKey: (provider?: string) =>
+    invoke<boolean>("has_api_key", { provider: provider ?? null }),
 
-  clearApiKey: () => invoke<void>("clear_api_key"),
+  clearApiKey: (provider?: string) =>
+    invoke<void>("clear_api_key", { provider: provider ?? null }),
 
   getSetting: (key: string) => invoke<string | null>("get_setting", { key }),
 
   setSetting: (key: string, value: string) =>
     invoke<void>("set_setting", { key, value }),
+
+  // AI & Vocabulary
+  lookupWord: (params: {
+    word: string;
+    contextSentence?: string | null;
+    targetLanguage?: string | null;
+    provider?: string | null;
+  }) =>
+    invoke<WordLookupResult>("lookup_word", {
+      word: params.word,
+      contextSentence: params.contextSentence ?? null,
+      targetLanguage: params.targetLanguage ?? null,
+      provider: params.provider ?? null,
+    }),
+
+  explainPassage: (params: {
+    passage: string;
+    mode?: "explain" | "translate" | "summarize";
+    targetLanguage?: string | null;
+    context?: string | null;
+    provider?: string | null;
+  }) =>
+    invoke<string>("explain_passage", {
+      passage: params.passage,
+      mode: params.mode ?? "explain",
+      targetLanguage: params.targetLanguage ?? null,
+      context: params.context ?? null,
+      provider: params.provider ?? null,
+    }),
+
+  chatWordInquiry: (params: {
+    word: string;
+    context?: string | null;
+    query: string;
+    history?: { role: string; parts: { text: string }[] }[];
+    targetLanguage?: string | null;
+    provider?: string | null;
+  }) =>
+    invoke<string>("chat_word_inquiry", {
+      word: params.word,
+      context: params.context ?? null,
+      query: params.query,
+      history: params.history ?? [],
+      targetLanguage: params.targetLanguage ?? null,
+      provider: params.provider ?? null,
+    }),
+
+  toggleFullscreen: () => invoke<boolean>("toggle_fullscreen"),
+  setFullscreen: (fullscreen: boolean) =>
+    invoke<boolean>("set_fullscreen", { fullscreen }),
+
+  testApiKey: (key: string, provider?: string) =>
+    invoke<boolean>("test_api_key", { key, provider: provider ?? null }),
 };

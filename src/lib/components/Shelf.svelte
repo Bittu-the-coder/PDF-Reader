@@ -336,6 +336,17 @@
         <span>Open PDF</span>
       </button>
 
+      <button
+        class="icon-btn-settings"
+        onclick={() => (appState.settingsModalOpen = true)}
+        title="Settings & Gemini API Key"
+      >
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+
       <!-- Hidden file input for web fallback -->
       <input
         type="file"
@@ -745,6 +756,26 @@
   .open-file-btn:hover {
     transform: translateY(-1px);
     box-shadow: 0 6px 18px rgba(217, 119, 6, 0.5);
+  }
+
+  .icon-btn-settings {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-surface-elevated, rgba(255, 255, 255, 0.06));
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+    color: var(--text-secondary, #999);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 150ms ease;
+  }
+
+  .icon-btn-settings:hover {
+    color: var(--text-primary, #fff);
+    background: var(--hover-bg, rgba(255, 255, 255, 0.12));
+    border-color: var(--border-hover, rgba(255, 255, 255, 0.2));
   }
 
   .hidden-input {

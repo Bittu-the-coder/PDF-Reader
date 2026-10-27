@@ -9,6 +9,7 @@ pub struct Word {
     pub chapter_id: Option<i64>,
     pub word: String,
     pub meaning: String,
+    pub meaning_hindi: Option<String>,
     pub example_sentence: Option<String>,
     pub page: Option<i64>,
     pub ai_generated: bool,
@@ -16,13 +17,20 @@ pub struct Word {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AddWord {
+    #[serde(alias = "book_id")]
     pub book_id: i64,
+    #[serde(alias = "chapter_id")]
     pub chapter_id: Option<i64>,
     pub word: String,
     pub meaning: String,
+    #[serde(default, alias = "meaning_hindi")]
+    pub meaning_hindi: Option<String>,
+    #[serde(default, alias = "example_sentence")]
     pub example_sentence: Option<String>,
     pub page: Option<i64>,
+    #[serde(default, alias = "ai_generated")]
     pub ai_generated: Option<bool>,
 }
 
@@ -46,13 +54,14 @@ impl Database {
         };
 
         let result = conn.execute(
-            "INSERT INTO words (book_id, chapter_id, word, meaning, example_sentence, page, ai_generated)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO words (book_id, chapter_id, word, meaning, meaning_hindi, example_sentence, page, ai_generated)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 w.book_id,
                 chapter_id,
                 w.word,
                 w.meaning,
+                w.meaning_hindi,
                 w.example_sentence,
                 w.page,
                 ai,
@@ -63,7 +72,7 @@ impl Database {
             Ok(_) => {
                 let id = conn.last_insert_rowid();
                 conn.prepare(
-                    "SELECT id, book_id, chapter_id, word, meaning, example_sentence, page, ai_generated, created_at
+                    "SELECT id, book_id, chapter_id, word, meaning, meaning_hindi, example_sentence, page, ai_generated, created_at
                      FROM words WHERE id = ?1",
                 )?
                 .query_row([id], Self::map_word)
@@ -84,14 +93,14 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let words = if let Some(cid) = chapter_id {
             let mut stmt = conn.prepare(
-                "SELECT id, book_id, chapter_id, word, meaning, example_sentence, page, ai_generated, created_at
+                "SELECT id, book_id, chapter_id, word, meaning, meaning_hindi, example_sentence, page, ai_generated, created_at
                  FROM words WHERE book_id = ?1 AND chapter_id = ?2 ORDER BY word COLLATE NOCASE",
             )?;
             stmt.query_map(rusqlite::params![book_id, cid], Self::map_word)?
                 .collect::<Result<Vec<_>, _>>()?
         } else {
             let mut stmt = conn.prepare(
-                "SELECT id, book_id, chapter_id, word, meaning, example_sentence, page, ai_generated, created_at
+                "SELECT id, book_id, chapter_id, word, meaning, meaning_hindi, example_sentence, page, ai_generated, created_at
                  FROM words WHERE book_id = ?1 ORDER BY word COLLATE NOCASE",
             )?;
             stmt.query_map([book_id], Self::map_word)?
@@ -104,7 +113,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let result = conn
             .prepare(
-                "SELECT id, book_id, chapter_id, word, meaning, example_sentence, page, ai_generated, created_at
+                "SELECT id, book_id, chapter_id, word, meaning, meaning_hindi, example_sentence, page, ai_generated, created_at
                  FROM words WHERE book_id = ?1 AND word = ?2 COLLATE NOCASE LIMIT 1",
             )?
             .query_row(rusqlite::params![book_id, word], Self::map_word)
@@ -116,12 +125,13 @@ impl Database {
         &self,
         id: i64,
         meaning: &str,
+        meaning_hindi: Option<&str>,
         example_sentence: Option<&str>,
     ) -> Result<(), AppError> {
         let conn = self.conn.lock().unwrap();
         let changed = conn.execute(
-            "UPDATE words SET meaning = ?1, example_sentence = ?2 WHERE id = ?3",
-            rusqlite::params![meaning, example_sentence, id],
+            "UPDATE words SET meaning = ?1, meaning_hindi = COALESCE(?2, meaning_hindi), example_sentence = ?3 WHERE id = ?4",
+            rusqlite::params![meaning, meaning_hindi, example_sentence, id],
         )?;
         if changed == 0 {
             return Err(AppError::NotFound(format!("Word {id} not found")));
@@ -145,10 +155,12 @@ impl Database {
             chapter_id: row.get(2)?,
             word: row.get(3)?,
             meaning: row.get(4)?,
-            example_sentence: row.get(5)?,
-            page: row.get(6)?,
-            ai_generated: row.get::<_, i64>(7)? != 0,
-            created_at: row.get(8)?,
+            meaning_hindi: row.get(5)?,
+            example_sentence: row.get(6)?,
+            page: row.get(7)?,
+            ai_generated: row.get::<_, i64>(8)? != 0,
+            created_at: row.get(9)?,
         })
     }
 }
+

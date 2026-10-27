@@ -5,18 +5,21 @@ use crate::error::AppError;
 use crate::secrets;
 
 #[tauri::command]
-pub async fn set_api_key(key: String) -> Result<(), AppError> {
-    secrets::set_gemini_api_key(&key)
+pub async fn set_api_key(key: String, provider: Option<String>) -> Result<(), AppError> {
+    let prov = provider.unwrap_or_else(|| "gemini".to_string());
+    secrets::set_api_key_for_provider(&prov, &key)
 }
 
 #[tauri::command]
-pub async fn has_api_key() -> Result<bool, AppError> {
-    Ok(secrets::has_gemini_api_key())
+pub async fn has_api_key(provider: Option<String>) -> Result<bool, AppError> {
+    let prov = provider.unwrap_or_else(|| "gemini".to_string());
+    Ok(secrets::has_api_key_for_provider(&prov))
 }
 
 #[tauri::command]
-pub async fn clear_api_key() -> Result<(), AppError> {
-    secrets::delete_gemini_api_key()
+pub async fn clear_api_key(provider: Option<String>) -> Result<(), AppError> {
+    let prov = provider.unwrap_or_else(|| "gemini".to_string());
+    secrets::delete_api_key_for_provider(&prov)
 }
 
 #[tauri::command]

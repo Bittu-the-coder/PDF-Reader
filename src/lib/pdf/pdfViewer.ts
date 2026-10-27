@@ -18,7 +18,7 @@ export interface OutlineItem {
 export class PDFViewer {
   doc: pdfjsLib.PDFDocumentProxy | null = null;
   numPages = 0;
-  currentRenderTask: any = null;
+  activeRenderTasks = new Map<HTMLCanvasElement, any>();
 
   async load(source: string | ArrayBuffer | Uint8Array): Promise<number> {
     const buildParam = () => {
@@ -65,19 +65,20 @@ export class PDFViewer {
   async renderPage(
     pageNumber: number,
     canvas: HTMLCanvasElement,
-    textLayerDiv: HTMLElement,
-    scale: number
+    textLayerDiv?: HTMLElement | null,
+    scale: number = 1.0
   ): Promise<{ width: number; height: number }> {
     if (!this.doc) throw new Error("No PDF loaded");
 
     // Cancel in-flight render task if one is already running on this canvas
-    if (this.currentRenderTask) {
+    const prevTask = this.activeRenderTasks.get(canvas);
+    if (prevTask) {
       try {
-        this.currentRenderTask.cancel();
+        prevTask.cancel();
       } catch (e) {
         // Ignore cancel errors
       }
-      this.currentRenderTask = null;
+      this.activeRenderTasks.delete(canvas);
     }
 
     const page = await this.doc.getPage(pageNumber);
@@ -100,7 +101,7 @@ export class PDFViewer {
       canvasContext: ctx,
       viewport: viewport,
     });
-    this.currentRenderTask = renderTask;
+    this.activeRenderTasks.set(canvas, renderTask);
 
     try {
       await renderTask.promise;
@@ -112,8 +113,8 @@ export class PDFViewer {
       throw renderErr;
     } finally {
       ctx.restore();
-      if (this.currentRenderTask === renderTask) {
-        this.currentRenderTask = null;
+      if (this.activeRenderTasks.get(canvas) === renderTask) {
+        this.activeRenderTasks.delete(canvas);
       }
     }
 

@@ -15,12 +15,16 @@ pub struct Highlight {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AddHighlight {
+    #[serde(alias = "book_id")]
     pub book_id: i64,
     pub page: i64,
     pub color: Option<String>,
     pub text: String,
+    #[serde(alias = "rects_json")]
     pub rects_json: String,
+    #[serde(alias = "note_id")]
     pub note_id: Option<i64>,
 }
 

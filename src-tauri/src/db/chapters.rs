@@ -13,9 +13,12 @@ pub struct Chapter {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateChapter {
+    #[serde(alias = "book_id")]
     pub book_id: i64,
     pub title: String,
+    #[serde(alias = "start_page")]
     pub start_page: i64,
     pub position: i64,
     pub source: Option<String>,

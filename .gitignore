@@ -10,8 +10,13 @@ vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vscode/
 
-# Reference repo (read-only, not part of our project)
-BookReader/
 
 # Rust build artifacts
 target/
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
+graft/.cache/
+graft/.graph/
+.mcp.json
+.claude/

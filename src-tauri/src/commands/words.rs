@@ -31,9 +31,10 @@ pub async fn update_word(
     db: State<'_, Database>,
     id: i64,
     meaning: String,
+    meaning_hindi: Option<String>,
     example_sentence: Option<String>,
 ) -> Result<(), AppError> {
-    db.update_word(id, &meaning, example_sentence.as_deref())
+    db.update_word(id, &meaning, meaning_hindi.as_deref(), example_sentence.as_deref())
 }
 
 #[tauri::command]

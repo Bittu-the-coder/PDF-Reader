@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS words (
   chapter_id INTEGER REFERENCES chapters(id) ON DELETE CASCADE,
   word TEXT NOT NULL,
   meaning TEXT NOT NULL,
+  meaning_hindi TEXT,
   example_sentence TEXT,
   page INTEGER,
   ai_generated INTEGER NOT NULL DEFAULT 0,

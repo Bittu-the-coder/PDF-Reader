@@ -34,3 +34,120 @@
 [data-theme="sepia"] .textLayer ::selection {
   background: rgba(180, 83, 9, 0.28);
 }
+
+/* Precise Single-Word and Inline Highlights inside span */
+.textLayer span mark.pdf-highlight-mark {
+  color: transparent;
+  background-color: rgba(250, 204, 21, 0.45) !important;
+  border-radius: 2px !important;
+  box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.4) !important;
+  cursor: pointer;
+  mix-blend-mode: multiply;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+  pointer-events: auto;
+}
+
+.textLayer span mark.pdf-highlight-mark:hover {
+  background-color: rgba(250, 204, 21, 0.72) !important;
+  box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.7) !important;
+}
+
+/* Underline variant on inline mark */
+.textLayer span mark.pdf-highlight-mark.underline {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border-bottom: 2.5px solid #eab308 !important;
+  border-radius: 0 !important;
+  mix-blend-mode: normal !important;
+  display: inline-block;
+  line-height: 0.95;
+}
+
+.textLayer span mark.pdf-highlight-mark.underline:hover {
+  border-bottom: 3px solid #ca8a04 !important;
+}
+
+/* Whole-span fallback highlights */
+.textLayer span.pdf-highlight-span {
+  background-color: rgba(250, 204, 21, 0.45) !important;
+  border-radius: 2px !important;
+  box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.4) !important;
+  cursor: pointer;
+  mix-blend-mode: multiply;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.textLayer span.pdf-highlight-span:hover {
+  background-color: rgba(250, 204, 21, 0.72) !important;
+  box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.7) !important;
+}
+
+/* Underline variant on whole span */
+.textLayer span.pdf-highlight-span.underline {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border-bottom: 2.5px solid #eab308 !important;
+  border-radius: 0 !important;
+  mix-blend-mode: normal !important;
+}
+
+.textLayer span.pdf-highlight-span.underline:hover {
+  border-bottom: 3px solid #ca8a04 !important;
+}
+
+/* Dark and Invert Themes */
+[data-theme="dark"] .textLayer span mark.pdf-highlight-mark,
+[data-theme="invert"] .textLayer span mark.pdf-highlight-mark,
+[data-theme="dark"] .textLayer span.pdf-highlight-span,
+[data-theme="invert"] .textLayer span.pdf-highlight-span {
+  background-color: rgba(250, 204, 21, 0.45) !important;
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.6) !important;
+  mix-blend-mode: screen;
+}
+
+[data-theme="dark"] .textLayer span mark.pdf-highlight-mark:hover,
+[data-theme="invert"] .textLayer span mark.pdf-highlight-mark:hover,
+[data-theme="dark"] .textLayer span.pdf-highlight-span:hover,
+[data-theme="invert"] .textLayer span.pdf-highlight-span:hover {
+  background-color: rgba(250, 204, 21, 0.75) !important;
+}
+
+[data-theme="dark"] .textLayer span mark.pdf-highlight-mark.underline,
+[data-theme="invert"] .textLayer span mark.pdf-highlight-mark.underline,
+[data-theme="dark"] .textLayer span.pdf-highlight-span.underline,
+[data-theme="invert"] .textLayer span.pdf-highlight-span.underline {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border-bottom-color: #facc15 !important;
+  mix-blend-mode: normal !important;
+}
+
+/* Sepia theme */
+[data-theme="sepia"] .textLayer span mark.pdf-highlight-mark,
+[data-theme="sepia"] .textLayer span.pdf-highlight-span {
+  background-color: rgba(245, 158, 11, 0.42) !important;
+  box-shadow: 0 0 0 1px rgba(180, 83, 9, 0.35) !important;
+  mix-blend-mode: multiply;
+}
+
+[data-theme="sepia"] .textLayer span mark.pdf-highlight-mark.underline,
+[data-theme="sepia"] .textLayer span.pdf-highlight-span.underline {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border-bottom-color: #d97706 !important;
+}
+
+/* Eyecare theme */
+[data-theme="eyecare"] .textLayer span mark.pdf-highlight-mark,
+[data-theme="eyecare"] .textLayer span.pdf-highlight-span {
+  background-color: rgba(245, 158, 11, 0.45) !important;
+  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.5) !important;
+  mix-blend-mode: screen;
+}
+
+[data-theme="eyecare"] .textLayer span mark.pdf-highlight-mark.underline,
+[data-theme="eyecare"] .textLayer span.pdf-highlight-span.underline {
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border-bottom-color: #d97706 !important;
+}

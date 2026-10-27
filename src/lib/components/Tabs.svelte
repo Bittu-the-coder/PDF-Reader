@@ -64,11 +64,15 @@
     align-items: center;
     gap: 8px;
     height: 34px;
+    min-height: 34px;
+    flex-shrink: 0;
     padding: 0 12px;
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border-subtle);
     user-select: none;
     overflow-x: auto;
+    position: relative;
+    z-index: 85;
   }
 
   .shelf-btn {

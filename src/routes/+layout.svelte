@@ -20,8 +20,18 @@
       }
     }
 
+    const preventScroll = () => {
+      if (window.scrollY !== 0 || window.scrollX !== 0) {
+        window.scrollTo(0, 0);
+      }
+    };
+    window.addEventListener("scroll", preventScroll, { passive: true });
+
     window.addEventListener("keydown", handleGlobalKeys);
-    return () => window.removeEventListener("keydown", handleGlobalKeys);
+    return () => {
+      window.removeEventListener("keydown", handleGlobalKeys);
+      window.removeEventListener("scroll", preventScroll);
+    };
   });
 </script>
 
@@ -31,6 +41,11 @@
 
 <style>
   .app-root {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
     width: 100vw;
     height: 100vh;
     overflow: hidden;

@@ -15,8 +15,11 @@ pub struct Note {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AddNote {
+    #[serde(alias = "book_id")]
     pub book_id: i64,
+    #[serde(alias = "chapter_id")]
     pub chapter_id: Option<i64>,
     pub content: String,
     pub page: Option<i64>,

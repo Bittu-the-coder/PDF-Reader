@@ -13,8 +13,9 @@
     "windows": [
       {
         "title": "shelf",
-        "width": 800,
-        "height": 600
+        "width": 1100,
+        "height": 750,
+        "zoomHotkeysEnabled": false
       }
     ],
     "security": {
@@ -23,7 +24,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["deb"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

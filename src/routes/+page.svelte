@@ -8,12 +8,112 @@
   import Reader from "../lib/components/Reader.svelte";
   import LookupCard from "../lib/components/LookupCard.svelte";
   import MemoryDrawer from "../lib/components/MemoryDrawer.svelte";
+  import SettingsModal from "../lib/components/SettingsModal.svelte";
 
+  import { onMount } from "svelte";
   import { api } from "../lib/api";
 
   let pdfViewer = $state<PDFViewer | null>(null);
   let isLoadingDoc = $state(false);
   let loadError = $state<string | null>(null);
+
+  onMount(() => {
+    let wheelAccumulator = 0;
+    let lastWheelTime = 0;
+
+    const handleGlobalWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (appState.currentView === "reader") {
+          const now = Date.now();
+          wheelAccumulator += e.deltaY;
+          if (now - lastWheelTime > 40 || Math.abs(wheelAccumulator) >= 25) {
+            if (wheelAccumulator < 0) {
+              appState.zoomIn();
+            } else if (wheelAccumulator > 0) {
+              appState.zoomOut();
+            }
+            wheelAccumulator = 0;
+            lastWheelTime = now;
+          }
+        }
+      }
+    };
+
+    const handleKeyShortcuts = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        appState.zoomIn();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "-") {
+        e.preventDefault();
+        appState.zoomOut();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "0") {
+        e.preventDefault();
+        appState.setZoom(1.0);
+        return;
+      }
+
+      if (e.key === "Escape") {
+        if (appState.settingsModalOpen) {
+          appState.settingsModalOpen = false;
+          return;
+        }
+        if (appState.lookupCardVisible) {
+          appState.lookupCardVisible = false;
+          return;
+        }
+        e.preventDefault();
+        appState.exitFullscreen();
+        return;
+      }
+
+      if (e.key === "F11" || (e.key === "f" && !e.ctrlKey && !e.altKey && !e.metaKey)) {
+        e.preventDefault();
+        appState.toggleFullscreen();
+      }
+    };
+
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (!appState.topBarPinned && appState.currentView === "reader") {
+        if (e.clientY <= 24) {
+          appState.onTopEdgeEnter();
+        }
+      }
+      if (!appState.sidebarPinned && appState.currentView === "reader") {
+        if (e.clientX <= 16) {
+          appState.onLeftEdgeEnter();
+        }
+      }
+    };
+
+    const preventGesture = (e: Event) => e.preventDefault();
+
+    window.addEventListener("wheel", handleGlobalWheel, { passive: false });
+    window.addEventListener("keydown", handleKeyShortcuts);
+    window.addEventListener("mousemove", handleGlobalMouseMove);
+    window.addEventListener("gesturestart", preventGesture, { passive: false });
+    window.addEventListener("gesturechange", preventGesture, { passive: false });
+    window.addEventListener("gestureend", preventGesture, { passive: false });
+
+    return () => {
+      window.removeEventListener("wheel", handleGlobalWheel);
+      window.removeEventListener("keydown", handleKeyShortcuts);
+      window.removeEventListener("mousemove", handleGlobalMouseMove);
+      window.removeEventListener("gesturestart", preventGesture);
+      window.removeEventListener("gesturechange", preventGesture);
+      window.removeEventListener("gestureend", preventGesture);
+    };
+  });
 
   $effect(() => {
     // When active book changes in reader, load the document
@@ -63,37 +163,68 @@
   <Shelf />
 {:else}
   <div class="reader-shell">
-    <Tabs />
-    <TopBar />
-    <Sidebar {pdfViewer} />
-    
-    <main class="reader-main">
-      {#if isLoadingDoc}
-        <div class="reader-loading">
-          <div class="spinner"></div>
-          <p>Opening {appState.activeBook?.title || "book"}...</p>
-        </div>
-      {:else if loadError}
-        <div class="reader-error">
-          <div class="error-card">
-            <h3>Unable to Open Document</h3>
-            <p>{loadError}</p>
-            <div class="error-actions">
-              <button class="btn-primary" onclick={() => appState.goToShelf()}>
-                Return to 3D Library
-              </button>
+    <!-- Top Edge Trigger Zone (when unpinned) -->
+    {#if !appState.topBarPinned}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="top-edge-trigger"
+        onmouseenter={() => appState.onTopEdgeEnter()}
+      ></div>
+    {/if}
+
+    <!-- Left Edge Trigger Zone (when unpinned) -->
+    {#if !appState.sidebarPinned}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="left-edge-trigger"
+        onmouseenter={() => appState.onLeftEdgeEnter()}
+      ></div>
+    {/if}
+
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <header
+      class="top-chrome {appState.topBarPinned ? 'pinned' : 'floating'} {appState.topBarVisible || appState.topBarPinned ? 'visible' : ''}"
+      onmouseenter={() => appState.onTopEdgeEnter()}
+      onmouseleave={() => appState.onTopEdgeLeave()}
+    >
+      <Tabs />
+      <TopBar />
+    </header>
+
+    <div class="reader-workspace {appState.sidebarPinned ? 'has-pinned-sidebar' : ''}">
+      <Sidebar {pdfViewer} />
+      
+      <main class="reader-main">
+        {#if isLoadingDoc}
+          <div class="reader-loading">
+            <div class="spinner"></div>
+            <p>Opening {appState.activeBook?.title || "book"}...</p>
+          </div>
+        {:else if loadError}
+          <div class="reader-error">
+            <div class="error-card">
+              <h3>Unable to Open Document</h3>
+              <p>{loadError}</p>
+              <div class="error-actions">
+                <button class="btn-primary" onclick={() => appState.goToShelf()}>
+                  Return to 3D Library
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      {:else}
-        <Reader bind:pdfViewer />
-      {/if}
-    </main>
+        {:else}
+          <Reader bind:pdfViewer />
+        {/if}
+      </main>
+
+      <MemoryDrawer />
+    </div>
 
     <LookupCard />
-    <MemoryDrawer />
   </div>
 {/if}
+
+<SettingsModal />
 
 <style>
   .reader-shell {
@@ -106,11 +237,76 @@
     background: var(--pdf-bg);
   }
 
+  .top-edge-trigger {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 20px;
+    z-index: 99;
+    background: transparent;
+  }
+
+  .left-edge-trigger {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 16px;
+    z-index: 94;
+    background: transparent;
+  }
+
+  .top-chrome {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    z-index: 100;
+    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+  }
+
+  .top-chrome.pinned {
+    position: relative;
+    transform: none;
+    opacity: 1;
+    flex-shrink: 0;
+  }
+
+  .top-chrome.floating {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    transform: translateY(-100%);
+    opacity: 0;
+    pointer-events: none;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  }
+
+  .top-chrome.floating.visible {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .reader-workspace {
+    flex: 1;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
   .reader-main {
     flex: 1;
     display: flex;
     overflow: hidden;
     position: relative;
+    width: 100%;
+    height: 100%;
   }
 
   .reader-loading {

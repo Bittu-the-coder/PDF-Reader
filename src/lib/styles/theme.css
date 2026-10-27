@@ -95,6 +95,109 @@
   --pdf-bg: #ede4d2;
 }
 
+[data-theme="eyecare"] {
+  --bg-primary: #211c16;
+  --bg-secondary: #2c251e;
+  --bg-surface: #383027;
+  --bg-surface-elevated: #443b30;
+  --bg-hover: rgba(245, 158, 11, 0.08);
+  --bg-active: rgba(245, 158, 11, 0.15);
+  --bg-glass: rgba(33, 28, 22, 0.88);
+
+  --text-primary: #fef3c7;
+  --text-secondary: #d4c5a9;
+  --text-muted: #9c8e76;
+
+  --border-subtle: rgba(245, 158, 11, 0.12);
+  --border-strong: rgba(245, 158, 11, 0.22);
+
+  --accent: #d97706;
+  --accent-hover: #b45309;
+  --accent-subtle: rgba(217, 119, 6, 0.18);
+  --accent-text: #ffffff;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.7);
+
+  --pdf-bg: #18140f;
+}
+
+[data-theme="invert"] {
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0c;
+  --bg-surface: #141416;
+  --bg-surface-elevated: #1e1e22;
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --bg-active: rgba(255, 255, 255, 0.15);
+  --bg-glass: rgba(0, 0, 0, 0.9);
+
+  --text-primary: #ffffff;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+
+  --border-subtle: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.24);
+
+  --accent: #38bdf8;
+  --accent-hover: #0284c7;
+  --accent-subtle: rgba(56, 189, 248, 0.15);
+  --accent-text: #000000;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.8);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.9);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.95);
+
+  --pdf-bg: #000000;
+}
+
+/* ============================================================
+   Real PDF Page Canvas Filters for Eye Protection and Dark Mode
+   ============================================================ */
+[data-theme="dark"] .pdf-canvas {
+  /* Invert black-on-white text to smooth dark mode with warm off-white */
+  filter: invert(0.88) hue-rotate(180deg) contrast(1.06) brightness(0.95);
+}
+[data-theme="dark"] .page-container {
+  background: #18181b !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.75) !important;
+}
+
+[data-theme="eyecare"] .pdf-canvas {
+  /* Warm amber shield / Candlelight blue-light filter */
+  filter: sepia(0.55) hue-rotate(-12deg) contrast(0.94) brightness(0.94);
+}
+[data-theme="eyecare"] .page-container {
+  background: #fdf3dc !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6) !important;
+}
+
+[data-theme="sepia"] .pdf-canvas {
+  /* Vintage parchment sepia tone */
+  filter: sepia(0.68) contrast(0.96) brightness(0.96);
+}
+[data-theme="sepia"] .page-container {
+  background: #fbf7ee !important;
+  box-shadow: 0 4px 18px rgba(70, 40, 10, 0.15) !important;
+}
+
+[data-theme="invert"] .pdf-canvas {
+  /* High-contrast pure black and white */
+  filter: invert(1) contrast(1.15);
+}
+[data-theme="invert"] .page-container {
+  background: #000000 !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.05) !important;
+}
+
+[data-theme="light"] .pdf-canvas {
+  filter: none;
+}
+[data-theme="light"] .page-container {
+  background: #ffffff !important;
+}
+
 /* Reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
   * {
@@ -112,9 +215,13 @@
 }
 
 html, body {
+  position: fixed;
+  inset: 0;
   width: 100%;
   height: 100%;
   overflow: hidden;
+  margin: 0;
+  padding: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", "Helvetica Neue", Arial, sans-serif;
   font-size: 14px;
   line-height: 1.5;
@@ -144,7 +251,7 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
-input, textarea, select {
+input, textarea {
   font-family: inherit;
   font-size: inherit;
   color: var(--text-primary);
@@ -156,8 +263,33 @@ input, textarea, select {
   transition: border-color var(--transition-fast);
 }
 
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: var(--text-primary) !important;
+  background-color: var(--bg-surface) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: var(--radius-sm);
+  padding: 6px 30px 6px 10px;
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+  transition: border-color var(--transition-fast);
+}
+
+select option {
+  background-color: var(--bg-surface-elevated, #24242c) !important;
+  color: var(--text-primary, #ffffff) !important;
+}
+
 input:focus, textarea:focus, select:focus {
-  border-color: var(--accent);
+  border-color: var(--accent) !important;
 }
 
 /* Custom minimal scrollbar */

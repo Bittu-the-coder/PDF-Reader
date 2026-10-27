@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod chapters;
 pub mod highlights;
 pub mod library;

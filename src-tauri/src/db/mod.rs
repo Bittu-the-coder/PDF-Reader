@@ -70,6 +70,15 @@ impl Database {
             conn.execute("INSERT INTO _migrations (name) VALUES (?1)", ["0001_init"])?;
         }
 
+        // Auto-migrate words table to ensure meaning_hindi column exists
+        let mut stmt = conn.prepare("PRAGMA table_info(words)")?;
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !columns.iter().any(|c| c == "meaning_hindi") {
+            conn.execute_batch("ALTER TABLE words ADD COLUMN meaning_hindi TEXT;")?;
+        }
+
         Ok(())
     }
 }

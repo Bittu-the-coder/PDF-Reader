@@ -1,3 +1,4 @@
+pub mod ai;
 #[cfg(feature = "desktop")]
 pub mod commands;
 pub mod db;
@@ -78,6 +79,13 @@ pub fn run() {
             commands::settings::clear_api_key,
             commands::settings::get_setting,
             commands::settings::set_setting,
+            // AI & Window
+            commands::ai::lookup_word,
+            commands::ai::explain_passage,
+            commands::ai::chat_word_inquiry,
+            commands::ai::toggle_fullscreen,
+            commands::ai::set_fullscreen,
+            commands::ai::test_api_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

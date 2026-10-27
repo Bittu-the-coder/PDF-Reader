@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shelf — AI-Powered PDF & Book Reader for Linux</title>
+  <meta name="description" content="A blazingly fast, privacy-first desktop book reader built with Rust and Svelte 5. Features bilingual AI definitions, instant sentence translation, interactive Inquire chat, and unified Book Memory.">
+  <meta name="keywords" content="PDF reader, desktop book reader, AI reading tutor, Tauri v2, Svelte 5, Rust, Gemini AI, OpenRouter, Linux PDF reader">
+  <meta property="og:title" content="Shelf — Intelligent Desktop PDF Reader">
+  <meta property="og:description" content="Read deeper with instant bilingual meanings, interactive AI inquiry, and unified Book Memory.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://bittu-the-coder.github.io/PDF-Reader/">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg-dark: #09090b;
+      --bg-surface: #121217;
+      --bg-surface-elevated: #181820;
+      --bg-card: rgba(24, 24, 32, 0.7);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-strong: rgba(255, 255, 255, 0.16);
+      --accent: #6366f1;
+      --accent-glow: rgba(99, 102, 241, 0.35);
+      --accent-light: #818cf8;
+      --cyan: #38bdf8;
+      --cyan-glow: rgba(56, 189, 248, 0.3);
+      --amber: #facc15;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --font-display: 'Outfit', sans-serif;
+      --font-body: 'Inter', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-primary);
+      font-family: var(--font-body);
+      line-height: 1.6;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Ambient Background Glow */
+    .ambient-glow-top {
+      position: absolute;
+      top: -150px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 1000px;
+      height: 600px;
+      background: radial-gradient(circle at 50% 30%, rgba(99, 102, 241, 0.22) 0%, rgba(56, 189, 248, 0.12) 40%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(80px);
+    }
+
+    .ambient-glow-mid {
+      position: absolute;
+      top: 1400px;
+      right: -200px;
+      width: 800px;
+      height: 800px;
+      background: radial-gradient(circle, rgba(168, 85, 247, 0.15) 0%, transparent 65%);
+      pointer-events: none;
+      z-index: 0;
+      filter: blur(100px);
+    }
+
+    /* Navigation Bar */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      backdrop-filter: blur(16px);
+      background: rgba(9, 9, 11, 0.75);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .nav-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text-primary);
+    }
+
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-sm);
+      background: linear-gradient(135deg, var(--accent) 0%, var(--cyan) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 14px var(--accent-glow);
+    }
+
+    .brand-icon svg {
+      width: 20px;
+      height: 20px;
+      color: white;
+    }
+
+    .brand-title {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 20px;
+      letter-spacing: -0.5px;
+    }
+
+    .brand-badge {
+      font-size: 10px;
+      padding: 2px 7px;
+      border-radius: 99px;
+      background: rgba(99, 102, 241, 0.18);
+      color: var(--accent-light);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .nav-link {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 500;
+      transition: color 0.15s ease;
+    }
+
+    .nav-link:hover {
+      color: var(--text-primary);
+    }
+
+    .nav-cta-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, var(--accent) 0%, #4f46e5 100%);
+      color: white;
+      text-decoration: none;
+      border-radius: var(--radius-sm);
+      font-size: 13.5px;
+      font-weight: 600;
+      box-shadow: 0 4px 14px var(--accent-glow);
+      transition: all 0.2s ease;
+    }
+
+    .nav-cta-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+    }
+
+    /* Hero Section */
+    .hero {
+      position: relative;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 90px 24px 60px 24px;
+      text-align: center;
+      z-index: 1;
+    }
+
+    .announcement-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 99px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-strong);
+      color: var(--cyan);
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 24px;
+      backdrop-filter: blur(10px);
+    }
+
+    .announcement-pill .pill-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+    }
+
+    .hero-title {
+      font-family: var(--font-display);
+      font-size: clamp(38px, 6vw, 68px);
+      font-weight: 800;
+      line-height: 1.12;
+      letter-spacing: -1.5px;
+      margin-bottom: 24px;
+      max-width: 900px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .gradient-text {
+      background: linear-gradient(135deg, #ffffff 20%, #94a3b8 60%, var(--accent-light) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .gradient-accent {
+      background: linear-gradient(135deg, var(--accent-light) 0%, var(--cyan) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-subtitle {
+      font-size: clamp(16px, 2vw, 20px);
+      color: var(--text-secondary);
+      max-width: 720px;
+      margin: 0 auto 36px auto;
+      line-height: 1.6;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+
+    .btn-download-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 28px;
+      background: linear-gradient(135deg, var(--accent) 0%, #4338ca 100%);
+      color: white;
+      text-decoration: none;
+      border-radius: var(--radius-md);
+      font-size: 15.5px;
+      font-weight: 600;
+      box-shadow: 0 10px 28px var(--accent-glow);
+      transition: all 0.25s ease;
+    }
+
+    .btn-download-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 14px 34px rgba(99, 102, 241, 0.55);
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 24px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-strong);
+      color: var(--text-primary);
+      text-decoration: none;
+      border-radius: var(--radius-md);
+      font-size: 15px;
+      font-weight: 500;
+      backdrop-filter: blur(12px);
+      transition: all 0.2s ease;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: rgba(255, 255, 255, 0.3);
+      transform: translateY(-1px);
+    }
+
+    /* Terminal Install Command */
+    .terminal-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      background: rgba(18, 18, 24, 0.8);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 10px 18px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--text-secondary);
+      max-width: 90%;
+      margin: 0 auto;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .terminal-prefix {
+      color: var(--cyan);
+      user-select: none;
+    }
+
+    .terminal-command {
+      color: #e2e8f0;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .copy-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-family: var(--font-body);
+      font-weight: 500;
+    }
+
+    .copy-btn:hover {
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.15);
+    }
+
+    /* Interactive Live App Mockup */
+    .mockup-wrapper {
+      max-width: 1100px;
+      margin: 60px auto 100px auto;
+      position: relative;
+      z-index: 2;
+    }
+
+    .mockup-window {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    }
+
+    .mockup-header {
+      background: #111116;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .mockup-dots {
+      display: flex;
+      gap: 7px;
+    }
+
+    .dot {
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+    }
+    .dot-red { background: #ef4444; }
+    .dot-yellow { background: #eab308; }
+    .dot-green { background: #22c55e; }
+
+    .mockup-titlebar {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mockup-modes {
+      display: flex;
+      gap: 6px;
+    }
+
+    .mockup-chip {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .mockup-chip.active {
+      background: var(--accent);
+      color: white;
+      border-color: transparent;
+    }
+
+    /* Mockup Interior Layout */
+    .mockup-body {
+      display: grid;
+      grid-template-columns: 200px 1fr 280px;
+      min-height: 520px;
+      background: #0d0d12;
+    }
+
+    .mockup-sidebar-left {
+      background: #101015;
+      border-right: 1px solid var(--border-subtle);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .sidebar-heading {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .outline-item {
+      font-size: 12px;
+      color: var(--text-secondary);
+      padding: 6px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .outline-item.active {
+      background: var(--accent-glow);
+      color: var(--accent-light);
+      font-weight: 500;
+    }
+
+    .mockup-reader-view {
+      padding: 30px 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      position: relative;
+      background: radial-gradient(circle at 50% 20%, #15151c 0%, #0d0d12 100%);
+    }
+
+    .mockup-page-sheet {
+      width: 100%;
+      max-width: 520px;
+      background: #ffffff;
+      color: #1e293b;
+      padding: 36px 40px;
+      border-radius: 4px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      font-family: 'Georgia', serif;
+      font-size: 13.5px;
+      line-height: 1.75;
+      position: relative;
+    }
+
+    .mockup-highlight {
+      background: rgba(250, 204, 21, 0.45);
+      border-radius: 2px;
+      box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.4);
+      padding: 0 2px;
+    }
+
+    .mockup-underline {
+      border-bottom: 2.5px solid #eab308;
+      padding-bottom: 1px;
+    }
+
+    /* Floating Inquire Dialog inside Mockup */
+    .mockup-lookup-card {
+      position: absolute;
+      top: 140px;
+      right: 40px;
+      width: 320px;
+      background: #181820;
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-md);
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.7);
+      padding: 14px;
+      color: var(--text-primary);
+      font-family: var(--font-body);
+      animation: floatPulse 4s ease-in-out infinite alternate;
+    }
+
+    @keyframes floatPulse {
+      0% { transform: translateY(0); }
+      100% { transform: translateY(-6px); }
+    }
+
+    .lookup-word-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+    }
+
+    .lookup-word {
+      font-family: var(--font-display);
+      font-size: 16px;
+      font-weight: 700;
+      color: white;
+    }
+
+    .lookup-hindi {
+      font-size: 13px;
+      color: var(--cyan);
+      font-weight: 500;
+    }
+
+    .lookup-def {
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+
+    .inquire-bubble {
+      background: #101015;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      font-size: 11px;
+      color: var(--text-primary);
+      margin-top: 6px;
+    }
+
+    .inquire-bubble strong {
+      color: var(--accent-light);
+    }
+
+    .mockup-sidebar-right {
+      background: #111116;
+      border-left: 1px solid var(--border-subtle);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .memory-card-mini {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 10px;
+    }
+
+    .memory-tag {
+      font-size: 9.5px;
+      padding: 1px 6px;
+      border-radius: 99px;
+      background: rgba(99, 102, 241, 0.2);
+      color: var(--accent-light);
+      font-weight: 600;
+      margin-bottom: 4px;
+      display: inline-block;
+    }
+
+    /* Features Grid Section */
+    .features-section {
+      max-width: 1200px;
+      margin: 80px auto;
+      padding: 0 24px;
+    }
+
+    .section-header {
+      text-align: center;
+      margin-bottom: 50px;
+    }
+
+    .section-eyebrow {
+      color: var(--accent-light);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .section-title {
+      font-family: var(--font-display);
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 700;
+      letter-spacing: -1px;
+      margin-bottom: 14px;
+    }
+
+    .section-description {
+      color: var(--text-secondary);
+      font-size: 16px;
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 28px;
+      backdrop-filter: blur(16px);
+      transition: all 0.25s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .feature-card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-4px);
+      border-color: var(--border-strong);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+    }
+
+    .feature-card:hover::before {
+      opacity: 1;
+    }
+
+    .feature-icon-wrapper {
+      width: 46px;
+      height: 46px;
+      border-radius: var(--radius-sm);
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 20px;
+      color: var(--accent-light);
+    }
+
+    .feature-title {
+      font-family: var(--font-display);
+      font-size: 19px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      letter-spacing: -0.3px;
+    }
+
+    .feature-desc {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* Download & Install Section */
+    .download-section {
+      max-width: 1000px;
+      margin: 100px auto;
+      padding: 50px 32px;
+      background: linear-gradient(180deg, rgba(24, 24, 32, 0.8) 0%, rgba(18, 18, 24, 0.95) 100%);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      text-align: center;
+      position: relative;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    }
+
+    .download-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
+      margin: 36px 0;
+      text-align: left;
+    }
+
+    .download-card {
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: all 0.2s ease;
+    }
+
+    .download-card:hover {
+      border-color: var(--accent);
+      background: rgba(99, 102, 241, 0.05);
+    }
+
+    .download-badge {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--cyan);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .download-name {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .download-meta {
+      font-size: 12.5px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+    }
+
+    .btn-card-dl {
+      padding: 9px 16px;
+      background: var(--accent);
+      color: white;
+      text-decoration: none;
+      border-radius: var(--radius-sm);
+      font-size: 13.5px;
+      font-weight: 600;
+      text-align: center;
+      transition: opacity 0.15s ease;
+    }
+
+    .btn-card-dl:hover {
+      opacity: 0.9;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border-subtle);
+      padding: 40px 24px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      margin-bottom: 16px;
+    }
+
+    .footer-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      transition: color 0.15s ease;
+    }
+
+    .footer-links a:hover {
+      color: var(--text-primary);
+    }
+
+    @media (max-width: 860px) {
+      .mockup-body {
+        grid-template-columns: 1fr;
+      }
+      .mockup-sidebar-left,
+      .mockup-sidebar-right {
+        display: none;
+      }
+      .mockup-lookup-card {
+        position: relative;
+        top: 0;
+        right: 0;
+        margin-top: 20px;
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient-glow-top"></div>
+  <div class="ambient-glow-mid"></div>
+
+  <!-- Header -->
+  <header>
+    <div class="nav-container">
+      <a href="#" class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+            <path d="M6 6h10"/>
+            <path d="M6 10h10"/>
+          </svg>
+        </div>
+        <span class="brand-title">Shelf</span>
+        <span class="brand-badge">v0.1.0</span>
+      </a>
+
+      <nav class="nav-links">
+        <a href="#features" class="nav-link">Features</a>
+        <a href="#demo" class="nav-link">Preview</a>
+        <a href="#download" class="nav-link">Download</a>
+        <a href="https://github.com/Bittu-the-coder/PDF-Reader" target="_blank" rel="noopener" class="nav-link">GitHub</a>
+        <a href="#download" class="nav-cta-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Get Shelf
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <main>
+    <section class="hero">
+      <div class="announcement-pill">
+        <span class="pill-dot"></span>
+        <span>Built with Rust &amp; Svelte 5 • Available for Linux</span>
+      </div>
+
+      <h1 class="hero-title">
+        Read books deeper. <br>
+        <span class="gradient-accent">Inquire with AI.</span> <br>
+        <span class="gradient-text">Remember everything.</span>
+      </h1>
+
+      <p class="hero-subtitle">
+        A privacy-first, lightning-fast PDF &amp; EPUB desktop reader. Featuring instant bilingual vocabulary lookups, multi-turn AI inquiry with structured markdown replies, and centralized Book Memory.
+      </p>
+
+      <div class="hero-actions">
+        <a href="https://github.com/Bittu-the-coder/PDF-Reader/releases/latest/download/shelf_0.1.0_amd64.deb" class="btn-download-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download for Linux (.deb)
+        </a>
+        <a href="https://github.com/Bittu-the-coder/PDF-Reader/releases/latest/download/shelf" class="btn-secondary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          Standalone Binary (x86_64)
+        </a>
+        <a href="https://github.com/Bittu-the-coder/PDF-Reader" target="_blank" rel="noopener" class="btn-secondary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12Z"/>
+          </svg>
+          Source Code
+        </a>
+      </div>
+
+      <div class="terminal-box">
+        <span class="terminal-prefix">$</span>
+        <code class="terminal-command" id="cmdText">wget https://github.com/Bittu-the-coder/PDF-Reader/releases/latest/download/shelf_0.1.0_amd64.deb &amp;&amp; sudo dpkg -i shelf_0.1.0_amd64.deb</code>
+        <button class="copy-btn" onclick="copyInstallCmd()">Copy</button>
+      </div>
+    </section>
+
+    <!-- App Mockup Section -->
+    <section class="mockup-wrapper" id="demo">
+      <div class="mockup-window">
+        <div class="mockup-header">
+          <div class="mockup-dots">
+            <span class="dot dot-red"></span>
+            <span class="dot dot-yellow"></span>
+            <span class="dot dot-green"></span>
+          </div>
+          <div class="mockup-titlebar">
+            <span>Shelf — Isaac Asimov - Foundation.pdf</span>
+            <span style="opacity: 0.5;">•</span>
+            <span style="color: var(--accent-light);">Page 14 of 244</span>
+          </div>
+          <div class="mockup-modes">
+            <span class="mockup-chip">Single</span>
+            <span class="mockup-chip active">Book Spread</span>
+            <span class="mockup-chip">Scroll</span>
+          </div>
+        </div>
+
+        <div class="mockup-body">
+          <!-- Sidebar Left: Outline -->
+          <div class="mockup-sidebar-left">
+            <span class="sidebar-heading">Contents</span>
+            <div class="outline-item">1. The Psychohistorians</div>
+            <div class="outline-item active">2. The Encyclopedists</div>
+            <div class="outline-item">3. The Mayors</div>
+            <div class="outline-item">4. The Traders</div>
+            <div class="outline-item">5. The Merchant Princes</div>
+          </div>
+
+          <!-- Main Reading View -->
+          <div class="mockup-reader-view">
+            <div class="mockup-page-sheet">
+              <p style="margin-bottom: 14px;">
+                "Hari Seldon established the <mark class="mockup-highlight">Foundation</mark> at the very edge of the galaxy, intending it to preserve the sum of human wisdom through the coming dark age."
+              </p>
+              <p>
+                "The Encyclopedists believed their work was purely academic, but <span class="mockup-underline">Salvor Hardin recognized the impending political crisis</span> that threatened to isolate Terminus forever."
+              </p>
+            </div>
+
+            <!-- Inquire Card Floating -->
+            <div class="mockup-lookup-card">
+              <div class="lookup-word-header">
+                <span class="lookup-word">Foundation</span>
+                <span class="lookup-hindi">नींव / संस्थान (noun)</span>
+              </div>
+              <p class="lookup-def">
+                An institution founded with an endowment; or the solid ground/basis on which an idea or structure is built.
+              </p>
+              <div class="inquire-bubble">
+                <div style="font-weight: 600; font-size: 10px; color: var(--text-muted); margin-bottom: 4px;">AI INQUIRY • CONTEXTUAL SYNONYMS</div>
+                <div>Here are the top synonyms for <strong>Foundation</strong> in this passage:</div>
+                <ul style="margin: 4px 0 2px 14px; line-height: 1.45;">
+                  <li><strong>Endowment</strong> (institutional setup)</li>
+                  <li><strong>Cornerstone</strong> (basis of survival)</li>
+                  <li><strong>Bastion</strong> (stronghold of knowledge)</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sidebar Right: Book Memory -->
+          <div class="mockup-sidebar-right">
+            <span class="sidebar-heading">Book Memory (p. 14)</span>
+            <div class="memory-card-mini">
+              <span class="memory-tag">Word • p. 14</span>
+              <div style="font-weight: 600; font-size: 12px; color: white;">Foundation</div>
+              <div style="font-size: 11px; color: var(--cyan);">नींव / संस्थान</div>
+            </div>
+            <div class="memory-card-mini">
+              <span class="memory-tag" style="background: rgba(250, 204, 21, 0.15); color: #eab308;">Underline • p. 14</span>
+              <div style="font-size: 11px; font-style: italic; color: var(--text-secondary);">
+                "Salvor Hardin recognized the impending political crisis..."
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features-section" id="features">
+      <div class="section-header">
+        <div class="section-eyebrow">Crafted for Serious Readers</div>
+        <h2 class="section-title">An OS-Level Reading Superpower</h2>
+        <p class="section-description">
+          Shelf merges the tactile speed of native Rust engineering with generative AI reading assistance.
+        </p>
+      </div>
+
+      <div class="features-grid">
+        <!-- Feature 1 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="m5 8 6 6"/>
+              <path d="m4 14 6-6 2-3"/>
+              <path d="M2 5h12"/>
+              <path d="M7 2h1"/>
+              <path d="m22 22-5-10-5 10"/>
+              <path d="M14 18h6"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">Bilingual AI Dictionary</h3>
+          <p class="feature-desc">
+            Highlight any word to instantly view clear definitions in English alongside authentic Hindi translations, contextual meanings, and audio pronunciation.
+          </p>
+        </div>
+
+        <!-- Feature 2 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">Interactive AI Inquire</h3>
+          <p class="feature-desc">
+            Chat conversationally with Gemini or OpenRouter right inside the popup card. Ask follow-up questions, request historical nuances, or simplify convoluted sentences.
+          </p>
+        </div>
+
+        <!-- Feature 3 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
+              <circle cx="12" cy="10" r="3"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">Unified Book Memory</h3>
+          <p class="feature-desc">
+            Every saved word, quote, personal note, highlight, and underline is indexed in a persistent sidebar. Click any page badge to jump and flash the exact passage.
+          </p>
+        </div>
+
+        <!-- Feature 4 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect width="18" height="18" x="3" y="3" rx="2"/>
+              <path d="M3 9h18"/>
+              <path d="M9 21V9"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">3 Reading Modes</h3>
+          <p class="feature-desc">
+            Switch effortlessly between distraction-free Single Page, a realistic two-page Book Spread with 3D page-flip animations, or Continuous Free Vertical Scroll.
+          </p>
+        </div>
+
+        <!-- Feature 5 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="m9 11-6 6v3h3l6-6"/>
+              <path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/>
+              <line x1="4" y1="21" x2="20" y2="21"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">Highlights &amp; Underlines</h3>
+          <p class="feature-desc">
+            Precision word annotations that highlight only the exact targeted word or sentence without spilling across the document. Includes dedicated underline mode.
+          </p>
+        </div>
+
+        <!-- Feature 6 -->
+        <div class="feature-card">
+          <div class="feature-icon-wrapper">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+          </div>
+          <h3 class="feature-title">Privacy-First Architecture</h3>
+          <p class="feature-desc">
+            Zero telemetry. All books, reading sessions, notes, and vocabulary are stored locally in an embedded SQLite database. Bring your own free API keys safely.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Download Section -->
+    <section class="download-section" id="download">
+      <div class="section-eyebrow">Get Started Now</div>
+      <h2 class="section-title">Download Shelf v0.1.0</h2>
+      <p class="section-description">
+        Fast, lightweight, native desktop application for Linux.
+      </p>
+
+      <div class="download-grid">
+        <div class="download-card">
+          <div>
+            <div class="download-badge">Ubuntu / Debian / Mint</div>
+            <div class="download-name">Debian Package (.deb)</div>
+            <div class="download-meta">Size: ~5.3 MB • x86_64</div>
+          </div>
+          <a href="https://github.com/Bittu-the-coder/PDF-Reader/releases/latest/download/shelf_0.1.0_amd64.deb" class="btn-card-dl">
+            Download .deb
+          </a>
+        </div>
+
+        <div class="download-card">
+          <div>
+            <div class="download-badge">Arch / Fedora / Generic Linux</div>
+            <div class="download-name">Standalone Binary</div>
+            <div class="download-meta">Size: ~13 MB • Direct Executable</div>
+          </div>
+          <a href="https://github.com/Bittu-the-coder/PDF-Reader/releases/latest/download/shelf" class="btn-card-dl">
+            Download Binary
+          </a>
+        </div>
+      </div>
+
+      <p style="font-size: 13px; color: var(--text-muted);">
+        Requirements: Linux x86_64 • WebKit2GTK • GLib 2.0 (standard on all modern distributions)
+      </p>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-links">
+      <a href="https://github.com/Bittu-the-coder/PDF-Reader" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/Bittu-the-coder/PDF-Reader/releases" target="_blank" rel="noopener">All Releases</a>
+      <a href="https://github.com/Bittu-the-coder/PDF-Reader/issues" target="_blank" rel="noopener">Report Issue</a>
+      <a href="https://github.com/Bittu-the-coder/PDF-Reader/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+    </div>
+    <p>Shelf is open-source software crafted with Tauri v2, Rust &amp; Svelte 5.</p>
+  </footer>
+
+  <script>
+    function copyInstallCmd() {
+      const text = document.getElementById('cmdText').innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = document.querySelector('.copy-btn');
+        const orig = btn.innerText;
+        btn.innerText = 'Copied! ✓';
+        btn.style.color = '#22c55e';
+        setTimeout(() => {
+          btn.innerText = orig;
+          btn.style.color = '';
+        }, 2200);
+      });
+    }
+  </script>
+</body>
+</html>

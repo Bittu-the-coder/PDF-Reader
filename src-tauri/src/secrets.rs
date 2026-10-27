@@ -2,10 +2,19 @@ use crate::error::AppError;
 use keyring::Entry;
 
 const SERVICE_NAME: &str = "com.shelf.reader";
-const USER_KEY: &str = "gemini_api_key";
+const GEMINI_USER_KEY: &str = "gemini_api_key";
+const OPENROUTER_USER_KEY: &str = "openrouter_api_key";
 
-pub fn set_gemini_api_key(key: &str) -> Result<(), AppError> {
-    let entry = Entry::new(SERVICE_NAME, USER_KEY)
+fn get_user_key(provider: &str) -> &'static str {
+    match provider {
+        "openrouter" => OPENROUTER_USER_KEY,
+        _ => GEMINI_USER_KEY,
+    }
+}
+
+pub fn set_api_key_for_provider(provider: &str, key: &str) -> Result<(), AppError> {
+    let user_key = get_user_key(provider);
+    let entry = Entry::new(SERVICE_NAME, user_key)
         .map_err(|e| AppError::Internal(format!("Keyring init error: {e}")))?;
     entry
         .set_password(key)
@@ -13,8 +22,9 @@ pub fn set_gemini_api_key(key: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-pub fn get_gemini_api_key() -> Result<Option<String>, AppError> {
-    let entry = Entry::new(SERVICE_NAME, USER_KEY)
+pub fn get_api_key_for_provider(provider: &str) -> Result<Option<String>, AppError> {
+    let user_key = get_user_key(provider);
+    let entry = Entry::new(SERVICE_NAME, user_key)
         .map_err(|e| AppError::Internal(format!("Keyring init error: {e}")))?;
     match entry.get_password() {
         Ok(key) => Ok(Some(key)),
@@ -23,8 +33,9 @@ pub fn get_gemini_api_key() -> Result<Option<String>, AppError> {
     }
 }
 
-pub fn delete_gemini_api_key() -> Result<(), AppError> {
-    let entry = Entry::new(SERVICE_NAME, USER_KEY)
+pub fn delete_api_key_for_provider(provider: &str) -> Result<(), AppError> {
+    let user_key = get_user_key(provider);
+    let entry = Entry::new(SERVICE_NAME, user_key)
         .map_err(|e| AppError::Internal(format!("Keyring init error: {e}")))?;
     match entry.delete_credential() {
         Ok(_) => Ok(()),
@@ -33,6 +44,23 @@ pub fn delete_gemini_api_key() -> Result<(), AppError> {
     }
 }
 
+pub fn has_api_key_for_provider(provider: &str) -> bool {
+    get_api_key_for_provider(provider).unwrap_or(None).is_some()
+}
+
+// Backwards-compatible aliases for Gemini
+pub fn set_gemini_api_key(key: &str) -> Result<(), AppError> {
+    set_api_key_for_provider("gemini", key)
+}
+
+pub fn get_gemini_api_key() -> Result<Option<String>, AppError> {
+    get_api_key_for_provider("gemini")
+}
+
+pub fn delete_gemini_api_key() -> Result<(), AppError> {
+    delete_api_key_for_provider("gemini")
+}
+
 pub fn has_gemini_api_key() -> bool {
-    get_gemini_api_key().unwrap_or(None).is_some()
+    has_api_key_for_provider("gemini")
 }
