@@ -60,7 +60,10 @@ class AppState {
   selectedSentence = $state<string>("");
   selectedPage = $state<number>(1);
   selectionRect = $state<{ top: number; left: number; width: number; height: number } | null>(null);
+  selectionNormalizedRects = $state<{ x: number; y: number; width: number; height: number }[]>([]);
   lookupCardVisible = $state<boolean>(false);
+  activeHighlight = $state<Highlight | null>(null);
+  activeHighlightRect = $state<{ top: number; left: number; width: number; height: number } | null>(null);
   
   // In-document Search
   searchQuery = $state<string>("");
@@ -251,6 +254,50 @@ class AppState {
       await this.refreshBookMemory(book.id);
     } catch (err) {
       console.error("Failed to open book:", err);
+    }
+  }
+
+  async openPdfFilePath(filePath: string) {
+    if (!filePath || !filePath.trim()) return;
+    try {
+      await this.refreshLibrary();
+      // Check if file already exists in library
+      const existing = this.books.find(
+        (b) => b.file_path === filePath || b.file_path.toLowerCase() === filePath.toLowerCase()
+      );
+      if (existing) {
+        await this.openBook(existing.id);
+        return;
+      }
+
+      // Read and register new PDF into the library
+      const bytes = await api.readPdfBytes(filePath);
+      const masterBytes = new Uint8Array(bytes);
+      const fileName = filePath.split(/[/\\]/).pop()?.replace(/\.pdf$/i, "") || "Document";
+
+      const { PDFViewer } = await import("../pdf/pdfViewer");
+      const viewer = new PDFViewer();
+      const pageCount = await viewer.load(masterBytes.slice());
+      const coverPng = await viewer.generateCoverPng();
+      const outline = await viewer.extractOutline();
+
+      const book = await api.addBook({
+        path: filePath,
+        shelfId: this.activeShelfId,
+        title: fileName,
+        pageCount,
+        coverPng,
+      });
+
+      if (outline.length > 0) {
+        await api.importOutline(book.id, outline);
+      }
+
+      this.docBufferCache.set(book.id, masterBytes);
+      await this.refreshLibrary();
+      await this.openBook(book.id);
+    } catch (err) {
+      console.error("Failed to open PDF from path:", err);
     }
   }
 

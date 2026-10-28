@@ -3,7 +3,15 @@
   import { appState } from "../stores/appState.svelte";
   import { api } from "../api";
   import { PDFViewer } from "../pdf/pdfViewer";
-  import { applyHighlightsToTextLayer } from "../pdf/highlights";
+  import {
+    applyHighlightsToAnnotationLayer,
+    mergeLineRects,
+    ANNOTATION_COLORS,
+    getAnnotationColorName,
+    isUnderlineAnnotation,
+    type HighlightColor,
+  } from "../pdf/highlights";
+  import type { Highlight } from "../api";
   import "../styles/pdfTextLayer.css";
 
   let { pdfViewer = $bindable() }: { pdfViewer: PDFViewer | null } = $props();
@@ -13,24 +21,116 @@
   let resizeObserver: ResizeObserver | null = null;
   let selectionDebounceTimer: any = null;
 
-  // Single page canvas & textLayer
+  // Single page canvas, annotationLayer & textLayer
   let singleCanvasEl = $state<HTMLCanvasElement>();
+  let singleAnnotationLayerEl = $state<HTMLDivElement>();
   let singleTextLayerEl = $state<HTMLDivElement>();
 
-  // Dual page canvases & textLayers
+  // Dual page canvases, annotationLayers & textLayers
   let leftCanvasEl = $state<HTMLCanvasElement>();
   let rightCanvasEl = $state<HTMLCanvasElement>();
+  let leftAnnotationLayerEl = $state<HTMLDivElement>();
+  let rightAnnotationLayerEl = $state<HTMLDivElement>();
   let leftTextLayerEl = $state<HTMLDivElement>();
   let rightTextLayerEl = $state<HTMLDivElement>();
 
   // 3D Flip animation state
   let isFlipping = $state(false);
   let flipDirection = $state<"next" | "prev">("next");
+  let copyFeedback = $state<string | null>(null);
 
-  function onHighlightClick() {
+  function onHighlightClick(h: Highlight, clientRect?: DOMRect) {
+    appState.activeHighlight = h;
+    if (clientRect) {
+      appState.activeHighlightRect = {
+        top: clientRect.top,
+        left: clientRect.left,
+        width: clientRect.width,
+        height: clientRect.height,
+      };
+    } else {
+      appState.activeHighlightRect = null;
+    }
+  }
+
+  async function handleUpdateHighlightColor(colorId: HighlightColor) {
+    if (!appState.activeHighlight) return;
+    const isUnderline = isUnderlineAnnotation(appState.activeHighlight.color);
+    const newColor = isUnderline ? `underline-${colorId}` : colorId;
+    try {
+      await api.updateHighlightColor(appState.activeHighlight.id, newColor);
+      appState.activeHighlight.color = newColor;
+      if (appState.activeBook) {
+        await appState.refreshBookMemory(appState.activeBook.id);
+      }
+    } catch (err) {
+      console.error("Failed to update highlight color:", err);
+    }
+  }
+
+  async function handleToggleHighlightType() {
+    if (!appState.activeHighlight) return;
+    const isUnderline = isUnderlineAnnotation(appState.activeHighlight.color);
+    const baseColor = getAnnotationColorName(appState.activeHighlight.color);
+    const newColor = isUnderline ? baseColor : `underline-${baseColor}`;
+    try {
+      await api.updateHighlightColor(appState.activeHighlight.id, newColor);
+      appState.activeHighlight.color = newColor;
+      if (appState.activeBook) {
+        await appState.refreshBookMemory(appState.activeBook.id);
+      }
+    } catch (err) {
+      console.error("Failed to toggle highlight type:", err);
+    }
+  }
+
+  async function handleDeleteActiveHighlight() {
+    if (!appState.activeHighlight) return;
+    try {
+      await api.deleteHighlight(appState.activeHighlight.id);
+      appState.activeHighlight = null;
+      appState.activeHighlightRect = null;
+      if (appState.activeBook) {
+        await appState.refreshBookMemory(appState.activeBook.id);
+      }
+    } catch (err) {
+      console.error("Failed to delete highlight:", err);
+    }
+  }
+
+  async function handleCopyHighlightText() {
+    if (!appState.activeHighlight?.text) return;
+    try {
+      await navigator.clipboard.writeText(appState.activeHighlight.text);
+      copyFeedback = "Copied!";
+      setTimeout(() => {
+        copyFeedback = null;
+      }, 1500);
+    } catch (err) {
+      console.error("Failed to copy highlight text:", err);
+    }
+  }
+
+  function handleOpenHighlightMemory() {
     appState.activeMemoryTab = "highlights";
     appState.memoryDrawerOpen = true;
+    appState.activeHighlight = null;
   }
+
+  let annotationBarStyle = $derived.by(() => {
+    if (!appState.activeHighlightRect) return "display: none;";
+    const r = appState.activeHighlightRect;
+    const barWidth = 330;
+    const barHeight = 44;
+    let left = r.left + r.width / 2 - barWidth / 2;
+    left = Math.max(12, Math.min(window.innerWidth - barWidth - 12, left));
+
+    let top = r.top - barHeight - 8;
+    if (top < 56) {
+      top = r.top + r.height + 8;
+    }
+    return `top: ${Math.round(top)}px; left: ${Math.round(left)}px;`;
+  });
 
   // Dual page numbering calculation:
   // For dual mode: Page 1 can be alone, or pages 2-3, 4-5, etc.
@@ -87,7 +187,7 @@
         appState.zoom = scale;
       }
       await pdfViewer.renderPage(appState.currentPage, singleCanvasEl, singleTextLayerEl, scale);
-      applyHighlightsToTextLayer(singleTextLayerEl, appState.currentPage, appState.highlights, onHighlightClick);
+      applyHighlightsToAnnotationLayer(singleAnnotationLayerEl, appState.currentPage, appState.highlights, onHighlightClick, singleTextLayerEl);
     } catch (err: any) {
       if (err?.name !== "RenderingCancelledException") {
         console.error("Single page render error:", err);
@@ -106,11 +206,11 @@
 
       if (leftCanvasEl && dualLeftPage) {
         await pdfViewer.renderPage(dualLeftPage, leftCanvasEl, leftTextLayerEl, scale);
-        applyHighlightsToTextLayer(leftTextLayerEl, dualLeftPage, appState.highlights, onHighlightClick);
+        applyHighlightsToAnnotationLayer(leftAnnotationLayerEl, dualLeftPage, appState.highlights, onHighlightClick, leftTextLayerEl);
       }
       if (rightCanvasEl && dualRightPage) {
         await pdfViewer.renderPage(dualRightPage, rightCanvasEl, rightTextLayerEl, scale);
-        applyHighlightsToTextLayer(rightTextLayerEl, dualRightPage, appState.highlights, onHighlightClick);
+        applyHighlightsToAnnotationLayer(rightAnnotationLayerEl, dualRightPage, appState.highlights, onHighlightClick, rightTextLayerEl);
       }
     } catch (err: any) {
       if (err?.name !== "RenderingCancelledException") {
@@ -167,7 +267,8 @@
           scale = await computeScale(scrollContainerEl.clientWidth, false);
         }
         await pdfViewer.renderPage(currentParam.pageNum, canvasNode, textDiv, scale);
-        applyHighlightsToTextLayer(textDiv, currentParam.pageNum, appState.highlights, onHighlightClick);
+        const annDiv = canvasNode.parentElement?.querySelector(".annotation-layer") as HTMLElement | null;
+        applyHighlightsToAnnotationLayer(annDiv, currentParam.pageNum, appState.highlights, onHighlightClick, textDiv);
       } catch (e: any) {
         if (e?.name !== "RenderingCancelledException") {
           console.warn(`Scroll page ${currentParam.pageNum} render error:`, e);
@@ -206,9 +307,9 @@
     };
   }
 
-  // Text selection handler triggered specifically on mouseup within the reader viewport
+  // Text selection handler triggered on mouseup anywhere in the window
   function handleViewportMouseUp(e: MouseEvent) {
-    if ((e.target as HTMLElement).closest(".lookup-card")) return;
+    if ((e.target as HTMLElement).closest(".lookup-card") || (e.target as HTMLElement).closest(".annotation-action-bar")) return;
     clearTimeout(selectionDebounceTimer);
     selectionDebounceTimer = setTimeout(() => {
       const selection = window.getSelection();
@@ -218,6 +319,8 @@
       if (!text || text.length === 0) return;
 
       const range = selection.getRangeAt(0);
+      if (!containerEl || !containerEl.contains(range.commonAncestorContainer)) return;
+
       const rect = range.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) return;
 
@@ -230,34 +333,71 @@
       }
 
       let detectedPage = appState.currentPage;
-      try {
-        const startNode = range.startContainer;
-        const parentEl = (startNode instanceof HTMLElement ? startNode : startNode.parentElement) as HTMLElement | null;
-        const pageEl = parentEl?.closest("[data-page]");
-        if (pageEl) {
-          const p = parseInt(pageEl.getAttribute("data-page") || "0", 10);
-          if (p > 0) detectedPage = p;
+      let startNode = range.startContainer;
+      let parentEl = (startNode instanceof HTMLElement ? startNode : startNode.parentElement) as HTMLElement | null;
+      let pageEl = parentEl?.closest(".page-container");
+      if (pageEl) {
+        const p = parseInt(pageEl.getAttribute("data-page") || "0", 10);
+        if (p > 0) detectedPage = p;
+      }
+
+      // Extract normalized rects for all selected lines
+      let normalizedRects: { x: number; y: number; width: number; height: number }[] = [];
+      if (pageEl) {
+        const pageRect = pageEl.getBoundingClientRect();
+        if (pageRect.width > 0 && pageRect.height > 0) {
+          const clientRects = Array.from(range.getClientRects());
+          const raw = clientRects
+            .filter((r) => r.width > 1 && r.height > 1 && r.bottom > pageRect.top && r.top < pageRect.bottom)
+            .map((r) => ({
+              x: Math.max(0, Math.min(1, (r.left - pageRect.left) / pageRect.width)),
+              y: Math.max(0, Math.min(1, (r.top - pageRect.top) / pageRect.height)),
+              width: Math.max(0, Math.min(1, r.width / pageRect.width)),
+              height: Math.max(0, Math.min(1, r.height / pageRect.height)),
+            }));
+          normalizedRects = mergeLineRects(raw);
         }
-      } catch (err) {}
+      }
 
       appState.selectedText = text;
       appState.selectedSentence = sentence || text;
       appState.selectedPage = detectedPage;
+      appState.selectionNormalizedRects = normalizedRects;
       appState.selectionRect = {
         top: rect.top,
         left: rect.left,
         width: rect.width,
         height: rect.height,
       };
+      appState.activeHighlight = null;
       appState.lookupCardVisible = true;
-    }, 120);
+    }, 80);
+  }
+
+  function handleViewportMouseDown(e: MouseEvent) {
+    if ((e.target as HTMLElement).closest(".lookup-card") || (e.target as HTMLElement).closest(".annotation-action-bar")) return;
+    appState.lookupCardVisible = false;
+    appState.activeHighlight = null;
+    appState.activeHighlightRect = null;
   }
 
   function handleViewportClick(e: MouseEvent) {
-    if ((e.target as HTMLElement).closest(".lookup-card")) return;
+    if ((e.target as HTMLElement).closest(".lookup-card") || (e.target as HTMLElement).closest(".annotation-action-bar")) return;
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed || !selection.toString().trim()) {
       appState.lookupCardVisible = false;
+    }
+
+    // Check if user clicked an existing annotation
+    const elements = document.elementsFromPoint(e.clientX, e.clientY);
+    const annotationRectEl = elements.find((el) => el.classList.contains("pdf-annotation-rect")) as HTMLElement | undefined;
+    if (annotationRectEl && annotationRectEl.dataset.highlightId) {
+      const hId = Number(annotationRectEl.dataset.highlightId);
+      const found = appState.highlights.find((h) => h.id === hId);
+      if (found) {
+        const r = annotationRectEl.getBoundingClientRect();
+        onHighlightClick(found, r);
+      }
     }
   }
 
@@ -454,22 +594,22 @@
   // Re-apply highlights whenever appState.highlights updates (e.g. user adds or deletes a highlight)
   $effect(() => {
     const highlights = appState.highlights;
-    if (appState.readingMode === "single" && singleTextLayerEl) {
-      applyHighlightsToTextLayer(singleTextLayerEl, appState.currentPage, highlights, onHighlightClick);
+    if (appState.readingMode === "single" && singleAnnotationLayerEl) {
+      applyHighlightsToAnnotationLayer(singleAnnotationLayerEl, appState.currentPage, highlights, onHighlightClick);
     } else if (appState.readingMode === "dual") {
-      if (leftTextLayerEl && dualLeftPage) {
-        applyHighlightsToTextLayer(leftTextLayerEl, dualLeftPage, highlights, onHighlightClick);
+      if (leftAnnotationLayerEl && dualLeftPage) {
+        applyHighlightsToAnnotationLayer(leftAnnotationLayerEl, dualLeftPage, highlights, onHighlightClick);
       }
-      if (rightTextLayerEl && dualRightPage) {
-        applyHighlightsToTextLayer(rightTextLayerEl, dualRightPage, highlights, onHighlightClick);
+      if (rightAnnotationLayerEl && dualRightPage) {
+        applyHighlightsToAnnotationLayer(rightAnnotationLayerEl, dualRightPage, highlights, onHighlightClick);
       }
     } else if (appState.readingMode === "scroll" && scrollContainerEl) {
       const items = scrollContainerEl.querySelectorAll(".scroll-page-item");
       items.forEach((item) => {
         const page = Number((item as HTMLElement).dataset.page);
-        const textLayer = item.querySelector(".textLayer") as HTMLElement | null;
-        if (page && textLayer) {
-          applyHighlightsToTextLayer(textLayer, page, highlights, onHighlightClick);
+        const annotationLayer = item.querySelector(".annotation-layer") as HTMLElement | null;
+        if (page && annotationLayer) {
+          applyHighlightsToAnnotationLayer(annotationLayer, page, highlights, onHighlightClick);
         }
       });
     }
@@ -477,16 +617,22 @@
 
   onMount(() => {
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("mouseup", handleViewportMouseUp);
+    window.addEventListener("mousedown", handleViewportMouseDown);
 
     if (containerEl && typeof ResizeObserver !== "undefined") {
+      let resizeTimer: any = null;
       resizeObserver = new ResizeObserver(() => {
-        if (appState.fitMode !== "custom") {
-          if (appState.readingMode === "single") {
-            renderSinglePage();
-          } else if (appState.readingMode === "dual") {
-            renderDualPages();
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (appState.fitMode !== "custom") {
+            if (appState.readingMode === "single") {
+              renderSinglePage();
+            } else if (appState.readingMode === "dual") {
+              renderDualPages();
+            }
           }
-        }
+        }, 120);
       });
       resizeObserver.observe(containerEl);
     }
@@ -494,6 +640,8 @@
 
   onDestroy(() => {
     window.removeEventListener("keydown", handleKeyDown);
+    window.removeEventListener("mouseup", handleViewportMouseUp);
+    window.removeEventListener("mousedown", handleViewportMouseDown);
     resizeObserver?.disconnect();
   });
 </script>
@@ -504,6 +652,7 @@
   class="reader-viewport"
   bind:this={containerEl}
   onscroll={handleScroll}
+  onmousedown={handleViewportMouseDown}
   onmouseup={handleViewportMouseUp}
   onclick={handleViewportClick}
   role="region"
@@ -514,6 +663,7 @@
     <div class="single-page-wrapper">
       <div class="page-container" class:flipping={isFlipping} data-page={appState.currentPage}>
         <canvas bind:this={singleCanvasEl} class="pdf-canvas"></canvas>
+        <div bind:this={singleAnnotationLayerEl} class="annotation-layer"></div>
         <div bind:this={singleTextLayerEl} class="textLayer"></div>
       </div>
     </div>
@@ -532,6 +682,7 @@
         <div class="book-leaf leaf-left">
           <div class="page-container dual-page left-page" data-page={dualLeftPage}>
             <canvas bind:this={leftCanvasEl} class="pdf-canvas"></canvas>
+            <div bind:this={leftAnnotationLayerEl} class="annotation-layer"></div>
             <div bind:this={leftTextLayerEl} class="textLayer"></div>
           </div>
           <span class="leaf-page-tag">{dualLeftPage}</span>
@@ -545,6 +696,7 @@
           {#if dualRightPage}
             <div class="page-container dual-page right-page" data-page={dualRightPage}>
               <canvas bind:this={rightCanvasEl} class="pdf-canvas"></canvas>
+              <div bind:this={rightAnnotationLayerEl} class="annotation-layer"></div>
               <div bind:this={rightTextLayerEl} class="textLayer"></div>
             </div>
             <span class="leaf-page-tag">{dualRightPage}</span>
@@ -582,8 +734,9 @@
         {#each Array(appState.pageCount) as _, i}
           {@const pageNum = i + 1}
           <div class="scroll-page-item" data-page={pageNum}>
-            <div class="page-container scroll-page-container">
+            <div class="page-container scroll-page-container" data-page={pageNum}>
               <canvas use:renderScrollCanvas={{ pageNum, zoom: appState.zoom, fitMode: appState.fitMode }} class="pdf-canvas"></canvas>
+              <div class="annotation-layer"></div>
               <div class="textLayer"></div>
             </div>
             <div class="scroll-page-label">
@@ -592,6 +745,64 @@
           </div>
         {/each}
       </div>
+    </div>
+  {/if}
+
+  {#if appState.activeHighlight && appState.activeHighlightRect}
+    {@const isUnderline = isUnderlineAnnotation(appState.activeHighlight.color)}
+    {@const currentColor = getAnnotationColorName(appState.activeHighlight.color)}
+    <div
+      class="annotation-action-bar"
+      style="top: {Math.max(12, appState.activeHighlightRect.top - 54)}px; left: {Math.max(16, Math.min(window.innerWidth - 320, appState.activeHighlightRect.left + appState.activeHighlightRect.width / 2 - 140))}px;"
+      onclick={(e) => e.stopPropagation()}
+      role="toolbar"
+      tabindex="-1"
+      aria-label="Annotation Actions"
+    >
+      <div class="action-bar-colors">
+        {#each ANNOTATION_COLORS as col}
+          <button
+            class="action-color-dot {col.id} {currentColor === col.id ? 'active' : ''}"
+            style="background: {col.color};"
+            title={col.label}
+            onclick={() => handleUpdateHighlightColor(col.id)}
+          ></button>
+        {/each}
+      </div>
+
+      <div class="action-bar-divider"></div>
+
+      <button
+        class="action-btn toggle-type-btn {isUnderline ? 'is-underline' : 'is-highlight'}"
+        title={isUnderline ? "Switch to Highlight" : "Switch to Underline"}
+        onclick={handleToggleHighlightType}
+      >
+        {#if isUnderline}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M5 4v3h5.5v12h3V7H19V4z"/>
+          </svg>
+          <span>Highlight</span>
+        {:else}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 3v7a6 6 0 0 0 12 0V3M4 21h16"/>
+          </svg>
+          <span>Underline</span>
+        {/if}
+      </button>
+
+      <button class="action-btn copy-btn" title="Copy Text" onclick={handleCopyHighlightText}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span>{copyFeedback || "Copy"}</span>
+      </button>
+
+      <button class="action-btn delete-btn" title="Delete Annotation" onclick={handleDeleteActiveHighlight}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+        </svg>
+      </button>
     </div>
   {/if}
 </div>
@@ -887,6 +1098,115 @@
       box-shadow: 0 0 6px 1px rgba(250, 204, 21, 0.5);
       background-color: rgba(250, 204, 21, 0.45);
       outline: 1px solid rgba(202, 138, 4, 0.4);
+    }
+  }
+
+  /* Floating Annotation Action Bar */
+  .annotation-action-bar {
+    position: fixed;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: rgba(24, 24, 30, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 9999px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.25);
+    animation: popIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none;
+  }
+
+  @keyframes popIn {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  .action-bar-colors {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .action-color-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1.5px solid rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    padding: 0;
+  }
+
+  .action-color-dot:hover {
+    transform: scale(1.25);
+  }
+
+  .action-color-dot.active {
+    box-shadow: 0 0 0 2px #ffffff, 0 0 8px rgba(255, 255, 255, 0.5);
+    transform: scale(1.15);
+  }
+
+  .action-bar-divider {
+    width: 1px;
+    height: 18px;
+    background: rgba(255, 255, 255, 0.18);
+    margin: 0 2px;
+  }
+
+  .action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+  }
+
+  .action-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+  }
+
+  .action-btn:active {
+    transform: scale(0.96);
+  }
+
+  .action-btn.delete-btn {
+    color: #f87171;
+    padding: 4px 6px;
+  }
+
+  .action-btn.delete-btn:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #fca5a5;
+  }
+
+  @media (max-width: 600px) {
+    .annotation-action-bar {
+      padding: 5px 8px;
+      gap: 5px;
+    }
+    .action-btn span {
+      display: none;
+    }
+    .action-color-dot {
+      width: 15px;
+      height: 15px;
     }
   }
 </style>

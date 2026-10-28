@@ -6,9 +6,13 @@ pub mod error;
 pub mod secrets;
 
 #[cfg(feature = "desktop")]
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 #[cfg(feature = "desktop")]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[cfg(feature = "desktop")]
+#[derive(Clone)]
+pub struct LaunchFileState(pub std::sync::Arc<std::sync::Mutex<Option<String>>>);
 
 #[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -21,11 +25,34 @@ pub fn run() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    // Check initial launch argument from CLI (e.g. shelf /path/to/doc.pdf or Open With)
+    let initial_file = std::env::args().skip(1).find(|arg| {
+        !arg.starts_with('-') && (arg.to_lowercase().ends_with(".pdf") || std::path::Path::new(arg).is_file())
+    });
+    let launch_state = LaunchFileState(std::sync::Arc::new(std::sync::Mutex::new(initial_file)));
+    let launch_state_clone = launch_state.clone();
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(move |app, argv, _cwd| {
+            let pdf_arg = argv.into_iter().skip(1).find(|arg| {
+                !arg.starts_with('-') && (arg.to_lowercase().ends_with(".pdf") || std::path::Path::new(arg).is_file())
+            });
+            if let Some(path) = pdf_arg {
+                if let Ok(mut lock) = launch_state_clone.0.lock() {
+                    *lock = Some(path.clone());
+                }
+                let _ = app.emit("open-pdf-file", path);
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .setup(|app| {
+        .setup(move |app| {
+            app.manage(launch_state);
             let app_dir = app
                 .path()
                 .app_data_dir()
@@ -37,6 +64,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::library::get_launch_file,
             // Library
             commands::library::add_book,
             commands::library::list_books,
@@ -73,6 +101,7 @@ pub fn run() {
             commands::highlights::add_highlight,
             commands::highlights::list_highlights,
             commands::highlights::delete_highlight,
+            commands::highlights::update_highlight_color,
             // Settings
             commands::settings::set_api_key,
             commands::settings::has_api_key,

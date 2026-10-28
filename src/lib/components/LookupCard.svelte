@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from "../stores/appState.svelte";
   import { api, type WordLookupResult } from "../api";
+  import { ANNOTATION_COLORS, mergeLineRects } from "../pdf/highlights";
 
   let isSaving = $state(false);
   let saveFeedback = $state<string | null>(null);
@@ -42,8 +43,8 @@
     }
     if (!appState.selectionRect) return "display: none;";
     const r = appState.selectionRect;
-    const cardWidth = isPhrase ? 400 : 350;
-    const cardHeight = isPhrase ? 430 : (showChat ? 420 : 320);
+    const cardWidth = Math.min(window.innerWidth - 32, isPhrase ? 400 : 360);
+    const cardHeight = isPhrase ? 450 : (showChat ? 440 : 340);
 
     let left = r.left + r.width / 2 - cardWidth / 2;
     if (left < 16) left = 16;
@@ -57,7 +58,7 @@
       top = Math.max(16, r.top - cardHeight - 8);
     }
 
-    return `top: ${Math.round(top)}px; left: ${Math.round(left)}px;`;
+    return `top: ${Math.round(top)}px; left: ${Math.round(left)}px; max-width: calc(100vw - 32px);`;
   });
 
   function startDrag(e: MouseEvent) {
@@ -428,18 +429,23 @@
     }
   }
 
-  async function handleAddAnnotation(color: "yellow" | "underline" = "yellow") {
+  async function handleAddAnnotation(color: string = "yellow") {
     if (!appState.activeBook) return;
     try {
+      const rawRects = (appState.selectionNormalizedRects && appState.selectionNormalizedRects.length > 0)
+        ? appState.selectionNormalizedRects
+        : [];
+      const rects = mergeLineRects(rawRects);
       await api.addHighlight({
         bookId: appState.activeBook.id,
         page: appState.selectedPage || appState.currentPage,
         text: appState.selectedText,
-        rectsJson: JSON.stringify(appState.selectionRect),
+        rectsJson: JSON.stringify(rects),
         color,
       });
       await appState.refreshBookMemory(appState.activeBook.id);
       appState.lookupCardVisible = false;
+      window.getSelection()?.removeAllRanges();
     } catch (err) {
       console.error("Failed to add annotation:", err);
     }
@@ -814,20 +820,41 @@
           <span>Note</span>
         </button>
 
-        <button class="btn btn-ghost" onclick={() => handleAddAnnotation("yellow")} title="Highlight text">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="m9 11-6 6v3h3l6-6"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>
-          </svg>
-          <span>Highlight</span>
-        </button>
+        <div class="annotation-palette-group">
+          <!-- Highlight Palette Row -->
+          <div class="mini-palette-row" title="Highlight selection">
+            <span class="mini-palette-label" title="Highlight">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M5 4v3h5.5v12h3V7H19V4z"/></svg>
+            </span>
+            <div class="palette-swatches">
+              {#each ANNOTATION_COLORS as col}
+                <button
+                  class="palette-swatch highlight-swatch {col.id}"
+                  style="background: {col.color};"
+                  title="Highlight {col.label}"
+                  onclick={() => handleAddAnnotation(col.id)}
+                ></button>
+              {/each}
+            </div>
+          </div>
 
-        <button class="btn btn-ghost" onclick={() => handleAddAnnotation("underline")} title="Underline text">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/>
-            <line x1="4" y1="21" x2="20" y2="21"/>
-          </svg>
-          <span>Underline</span>
-        </button>
+          <!-- Underline Palette Row -->
+          <div class="mini-palette-row" title="Underline selection">
+            <span class="mini-palette-label" title="Underline">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 3v7a6 6 0 0 0 12 0V3M4 21h16"/></svg>
+            </span>
+            <div class="palette-swatches">
+              {#each ANNOTATION_COLORS as col}
+                <button
+                  class="palette-swatch underline-swatch {col.id}"
+                  style="border-bottom: 2.5px solid {col.color};"
+                  title="Underline {col.label}"
+                  onclick={() => handleAddAnnotation(`underline-${col.id}`)}
+                ></button>
+              {/each}
+            </div>
+          </div>
+        </div>
       </div>
     {:else}
       <!-- Quick Inline Note Input -->
@@ -1640,5 +1667,71 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
+  }
+
+  /* Annotation Palette Swatches */
+  .annotation-palette-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-left: 4px;
+    border-left: 1px solid var(--border-subtle);
+    margin-left: 2px;
+  }
+
+  .mini-palette-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .mini-palette-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    color: var(--text-muted);
+  }
+
+  .palette-swatches {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .palette-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    cursor: pointer;
+    padding: 0;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .palette-swatch:hover {
+    transform: scale(1.3);
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
+  }
+
+  .palette-swatch.underline-swatch {
+    background: transparent;
+    border-radius: 2px;
+    height: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+  }
+
+  @media (max-width: 480px) {
+    .card-actions {
+      flex-wrap: wrap;
+    }
+    .annotation-palette-group {
+      width: 100%;
+      border-left: none;
+      border-top: 1px solid var(--border-subtle);
+      padding-top: 6px;
+      margin-left: 0;
+    }
   }
 </style>

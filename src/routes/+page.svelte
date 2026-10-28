@@ -98,6 +98,25 @@
 
     const preventGesture = (e: Event) => e.preventDefault();
 
+    // Check initial launch file argument from CLI or system "Open With"
+    api.getLaunchFile().then((filePath) => {
+      if (filePath) {
+        appState.openPdfFilePath(filePath);
+      }
+    }).catch(console.error);
+
+    // Listen for single-instance open events when user clicks another PDF while app is running
+    let unlistenEvent: (() => void) | null = null;
+    import("@tauri-apps/api/event").then(({ listen }) => {
+      listen<string>("open-pdf-file", (event) => {
+        if (event.payload) {
+          appState.openPdfFilePath(event.payload);
+        }
+      }).then((unlisten) => {
+        unlistenEvent = unlisten;
+      });
+    }).catch(console.error);
+
     window.addEventListener("wheel", handleGlobalWheel, { passive: false });
     window.addEventListener("keydown", handleKeyShortcuts);
     window.addEventListener("mousemove", handleGlobalMouseMove);
@@ -106,6 +125,7 @@
     window.addEventListener("gestureend", preventGesture, { passive: false });
 
     return () => {
+      unlistenEvent?.();
       window.removeEventListener("wheel", handleGlobalWheel);
       window.removeEventListener("keydown", handleKeyShortcuts);
       window.removeEventListener("mousemove", handleGlobalMouseMove);

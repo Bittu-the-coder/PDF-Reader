@@ -205,3 +205,8 @@ pub async fn rename_shelf(
 pub async fn delete_shelf(db: State<'_, Database>, id: i64) -> Result<(), AppError> {
     db.delete_shelf(id)
 }
+
+#[tauri::command]
+pub fn get_launch_file(state: State<'_, crate::LaunchFileState>) -> Option<String> {
+    state.0.lock().ok().and_then(|mut lock| lock.take())
+}

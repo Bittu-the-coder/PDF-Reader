@@ -446,4 +446,13 @@
     padding: 24px 16px;
     text-align: center;
   }
+
+  @media (max-width: 640px) {
+    .sidebar {
+      width: min(280px, 85vw);
+    }
+    .thumbnails-grid {
+      grid-template-columns: 1fr;
+    }
+  }
 </style>

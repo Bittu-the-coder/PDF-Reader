@@ -253,10 +253,7 @@
   <header class="shelf-header">
     <div class="brand">
       <div class="logo-mark">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
-          <path d="M6 6h10"/><path d="M6 10h10"/>
-        </svg>
+        <img src="/logo.png" alt="Shelf Logo" class="shelf-brand-logo" />
       </div>
       <div class="brand-text">
         <span class="brand-title">Shelf</span>
@@ -1352,5 +1349,59 @@
     display: flex;
     justify-content: flex-end;
     gap: 10px;
+  }
+
+  .shelf-brand-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    object-fit: cover;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Responsive Shelf Rules */
+  @media (max-width: 900px) {
+    .shelf-header {
+      padding: 10px 16px;
+      gap: 10px;
+    }
+    .brand-subtitle {
+      display: none;
+    }
+    .search-box {
+      max-width: 180px;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .shelf-header {
+      flex-wrap: wrap;
+    }
+    .brand {
+      order: 1;
+    }
+    .shelf-actions {
+      order: 2;
+    }
+    .shelves-tabs {
+      order: 3;
+      width: 100%;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .shelves-tabs::-webkit-scrollbar {
+      display: none;
+    }
+    .search-box {
+      order: 4;
+      max-width: 100%;
+      width: 100%;
+    }
+    .toggle-btn span {
+      display: none;
+    }
+    .open-file-btn span {
+      display: none;
+    }
   }
 </style>

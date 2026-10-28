@@ -24,3 +24,12 @@ pub async fn list_highlights(
 pub async fn delete_highlight(db: State<'_, Database>, id: i64) -> Result<(), AppError> {
     db.delete_highlight(id)
 }
+
+#[tauri::command]
+pub async fn update_highlight_color(
+    db: State<'_, Database>,
+    id: i64,
+    color: String,
+) -> Result<(), AppError> {
+    db.update_highlight_color(id, &color)
+}

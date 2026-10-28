@@ -79,6 +79,18 @@ impl Database {
         Ok(())
     }
 
+    pub fn update_highlight_color(&self, id: i64, color: &str) -> Result<(), AppError> {
+        let conn = self.conn.lock().unwrap();
+        let changed = conn.execute(
+            "UPDATE highlights SET color = ?1 WHERE id = ?2",
+            rusqlite::params![color, id],
+        )?;
+        if changed == 0 {
+            return Err(AppError::NotFound(format!("Highlight {id} not found")));
+        }
+        Ok(())
+    }
+
     fn map_highlight(row: &rusqlite::Row<'_>) -> rusqlite::Result<Highlight> {
         Ok(Highlight {
             id: row.get(0)?,

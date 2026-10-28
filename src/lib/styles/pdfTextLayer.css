@@ -1,4 +1,107 @@
-/* PDF.js Text Layer styling for native text selection and highlights */
+/* =========================================================================
+   PDF.js Text Layer & Annotation Layer Styling
+   Optimized for native text selection, multi-color highlights & underlines
+   ========================================================================= */
+
+/* The Canvas & Annotation Layers inside .page-container */
+.annotation-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+  border-radius: 2px;
+}
+
+/* Base Annotation Rectangles */
+.pdf-annotation-rect {
+  position: absolute;
+  pointer-events: auto;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: opacity 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* -------------------------------------------------------------------------
+   HIGHLIGHTS (Solid translucent colored background, seamless marker strokes)
+   ------------------------------------------------------------------------- */
+.pdf-annotation-rect.highlight {
+  border-radius: 2px;
+  mix-blend-mode: multiply;
+  border: none !important;
+  outline: none !important;
+}
+
+.pdf-annotation-rect.highlight:hover {
+  filter: brightness(0.92);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+}
+
+/* -------------------------------------------------------------------------
+   UNDERLINES (Crisp single baseline stroke exactly beneath the text line)
+   ------------------------------------------------------------------------- */
+.pdf-annotation-rect.underline {
+  background: transparent !important;
+  background-color: transparent !important;
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-bottom-style: solid !important;
+  border-bottom-width: 2.5px !important;
+  border-radius: 0 !important;
+  outline: none !important;
+  mix-blend-mode: normal !important;
+}
+
+.pdf-annotation-rect.underline:hover {
+  border-bottom-width: 3.5px !important;
+  filter: brightness(1.15) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
+}
+
+/* Explicit Underline Color Classes */
+.pdf-annotation-rect.underline.color-yellow { border-bottom-color: #eab308 !important; }
+.pdf-annotation-rect.underline.color-green  { border-bottom-color: #16a34a !important; }
+.pdf-annotation-rect.underline.color-blue   { border-bottom-color: #2563eb !important; }
+.pdf-annotation-rect.underline.color-purple { border-bottom-color: #9333ea !important; }
+.pdf-annotation-rect.underline.color-pink   { border-bottom-color: #e11d48 !important; }
+.pdf-annotation-rect.underline.color-orange { border-bottom-color: #ea580c !important; }
+
+/* Explicit Highlight Color Classes */
+.pdf-annotation-rect.highlight.color-yellow { background-color: rgba(250, 204, 21, 0.42) !important; }
+.pdf-annotation-rect.highlight.color-green  { background-color: rgba(74, 222, 128, 0.40) !important; }
+.pdf-annotation-rect.highlight.color-blue   { background-color: rgba(96, 165, 250, 0.40) !important; }
+.pdf-annotation-rect.highlight.color-purple { background-color: rgba(192, 132, 252, 0.40) !important; }
+.pdf-annotation-rect.highlight.color-pink   { background-color: rgba(244, 114, 182, 0.40) !important; }
+.pdf-annotation-rect.highlight.color-orange { background-color: rgba(251, 146, 60, 0.40) !important; }
+
+/* -------------------------------------------------------------------------
+   THEME ADAPTATIONS
+   ------------------------------------------------------------------------- */
+[data-theme="dark"] .pdf-annotation-rect.highlight,
+[data-theme="invert"] .pdf-annotation-rect.highlight {
+  mix-blend-mode: screen;
+}
+
+[data-theme="dark"] .pdf-annotation-rect.highlight:hover,
+[data-theme="invert"] .pdf-annotation-rect.highlight:hover {
+  filter: brightness(1.25);
+  box-shadow: 0 0 8px currentColor;
+}
+
+[data-theme="sepia"] .pdf-annotation-rect.highlight {
+  mix-blend-mode: multiply;
+}
+
+[data-theme="eyecare"] .pdf-annotation-rect.highlight {
+  mix-blend-mode: multiply;
+}
+
+/* -------------------------------------------------------------------------
+   PDF.JS TEXT LAYER (Clean, native text selection)
+   ------------------------------------------------------------------------- */
 .textLayer {
   position: absolute;
   text-align: initial;
@@ -6,148 +109,90 @@
   left: 0;
   right: 0;
   bottom: 0;
-  overflow: hidden;
+  overflow: clip;
   line-height: 1;
+  -webkit-text-size-adjust: none;
+  -moz-text-size-adjust: none;
   text-size-adjust: none;
   forced-color-adjust: none;
   transform-origin: 0 0;
+  caret-color: CanvasText;
   z-index: 2;
   pointer-events: auto;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
-.textLayer span,
-.textLayer br {
+.textLayer :is(span, br) {
   color: transparent;
   position: absolute;
   white-space: pre;
   cursor: text;
   transform-origin: 0% 0%;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+}
+
+.textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+
+.textLayer span[role="img"] {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+/* Crucial: EndOfContent fixes selection collapsing when dragging past paragraph ends */
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  user-select: none;
+}
+
+.textLayer.selecting .endOfContent {
+  top: 0;
 }
 
 /* Selected text background matching app accent */
 .textLayer ::selection {
-  background: var(--accent-subtle, rgba(99, 102, 241, 0.35));
+  background: var(--accent-subtle, rgba(99, 102, 241, 0.38));
+  color: transparent;
+}
+
+.textLayer ::-moz-selection {
+  background: var(--accent-subtle, rgba(99, 102, 241, 0.38));
   color: transparent;
 }
 
 /* When in sepia mode, warm selection */
-[data-theme="sepia"] .textLayer ::selection {
-  background: rgba(180, 83, 9, 0.28);
+[data-theme="sepia"] .textLayer ::selection,
+[data-theme="sepia"] .textLayer ::-moz-selection {
+  background: rgba(180, 83, 9, 0.32);
 }
 
-/* Precise Single-Word and Inline Highlights inside span */
-.textLayer span mark.pdf-highlight-mark {
-  color: transparent;
-  background-color: rgba(250, 204, 21, 0.45) !important;
-  border-radius: 2px !important;
-  box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.4) !important;
-  cursor: pointer;
-  mix-blend-mode: multiply;
-  transition: background-color 0.15s ease, box-shadow 0.15s ease;
-  pointer-events: auto;
+/* When in eyecare mode, amber selection */
+[data-theme="eyecare"] .textLayer ::selection,
+[data-theme="eyecare"] .textLayer ::-moz-selection {
+  background: rgba(217, 119, 6, 0.35);
 }
 
-.textLayer span mark.pdf-highlight-mark:hover {
-  background-color: rgba(250, 204, 21, 0.72) !important;
-  box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.7) !important;
-}
-
-/* Underline variant on inline mark */
-.textLayer span mark.pdf-highlight-mark.underline {
-  background-color: transparent !important;
-  box-shadow: none !important;
-  border-bottom: 2.5px solid #eab308 !important;
-  border-radius: 0 !important;
-  mix-blend-mode: normal !important;
-  display: inline-block;
-  line-height: 0.95;
-}
-
-.textLayer span mark.pdf-highlight-mark.underline:hover {
-  border-bottom: 3px solid #ca8a04 !important;
-}
-
-/* Whole-span fallback highlights */
-.textLayer span.pdf-highlight-span {
-  background-color: rgba(250, 204, 21, 0.45) !important;
-  border-radius: 2px !important;
-  box-shadow: 0 0 0 1px rgba(234, 179, 8, 0.4) !important;
-  cursor: pointer;
-  mix-blend-mode: multiply;
-  transition: background-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.textLayer span.pdf-highlight-span:hover {
-  background-color: rgba(250, 204, 21, 0.72) !important;
-  box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.7) !important;
-}
-
-/* Underline variant on whole span */
-.textLayer span.pdf-highlight-span.underline {
-  background-color: transparent !important;
-  box-shadow: none !important;
-  border-bottom: 2.5px solid #eab308 !important;
-  border-radius: 0 !important;
-  mix-blend-mode: normal !important;
-}
-
-.textLayer span.pdf-highlight-span.underline:hover {
-  border-bottom: 3px solid #ca8a04 !important;
-}
-
-/* Dark and Invert Themes */
-[data-theme="dark"] .textLayer span mark.pdf-highlight-mark,
-[data-theme="invert"] .textLayer span mark.pdf-highlight-mark,
-[data-theme="dark"] .textLayer span.pdf-highlight-span,
-[data-theme="invert"] .textLayer span.pdf-highlight-span {
-  background-color: rgba(250, 204, 21, 0.45) !important;
-  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.6) !important;
-  mix-blend-mode: screen;
-}
-
-[data-theme="dark"] .textLayer span mark.pdf-highlight-mark:hover,
-[data-theme="invert"] .textLayer span mark.pdf-highlight-mark:hover,
-[data-theme="dark"] .textLayer span.pdf-highlight-span:hover,
-[data-theme="invert"] .textLayer span.pdf-highlight-span:hover {
-  background-color: rgba(250, 204, 21, 0.75) !important;
-}
-
-[data-theme="dark"] .textLayer span mark.pdf-highlight-mark.underline,
-[data-theme="invert"] .textLayer span mark.pdf-highlight-mark.underline,
-[data-theme="dark"] .textLayer span.pdf-highlight-span.underline,
-[data-theme="invert"] .textLayer span.pdf-highlight-span.underline {
-  background-color: transparent !important;
-  box-shadow: none !important;
-  border-bottom-color: #facc15 !important;
-  mix-blend-mode: normal !important;
-}
-
-/* Sepia theme */
-[data-theme="sepia"] .textLayer span mark.pdf-highlight-mark,
-[data-theme="sepia"] .textLayer span.pdf-highlight-span {
-  background-color: rgba(245, 158, 11, 0.42) !important;
-  box-shadow: 0 0 0 1px rgba(180, 83, 9, 0.35) !important;
-  mix-blend-mode: multiply;
-}
-
-[data-theme="sepia"] .textLayer span mark.pdf-highlight-mark.underline,
-[data-theme="sepia"] .textLayer span.pdf-highlight-span.underline {
-  background-color: transparent !important;
-  box-shadow: none !important;
-  border-bottom-color: #d97706 !important;
-}
-
-/* Eyecare theme */
-[data-theme="eyecare"] .textLayer span mark.pdf-highlight-mark,
-[data-theme="eyecare"] .textLayer span.pdf-highlight-span {
-  background-color: rgba(245, 158, 11, 0.45) !important;
-  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.5) !important;
-  mix-blend-mode: screen;
-}
-
-[data-theme="eyecare"] .textLayer span mark.pdf-highlight-mark.underline,
-[data-theme="eyecare"] .textLayer span.pdf-highlight-span.underline {
-  background-color: transparent !important;
-  box-shadow: none !important;
-  border-bottom-color: #d97706 !important;
+/* When in dark/invert mode, luminous violet/amber selection */
+[data-theme="dark"] .textLayer ::selection,
+[data-theme="dark"] .textLayer ::-moz-selection,
+[data-theme="invert"] .textLayer ::selection,
+[data-theme="invert"] .textLayer ::-moz-selection {
+  background: rgba(129, 140, 248, 0.45);
 }

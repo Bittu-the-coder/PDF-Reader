@@ -146,6 +146,8 @@ export const api = {
   saveImportedPdf: (name: string, bytes: number[]) =>
     invoke<string>("save_imported_pdf", { name, bytes }),
 
+  getLaunchFile: () => invoke<string | null>("get_launch_file"),
+
   // Shelves
   createShelf: (name: string) => invoke<Shelf>("create_shelf", { name }),
 
@@ -240,6 +242,9 @@ export const api = {
     invoke<Highlight[]>("list_highlights", { bookId, page: page ?? null }),
 
   deleteHighlight: (id: number) => invoke<void>("delete_highlight", { id }),
+
+  updateHighlightColor: (id: number, color: string) =>
+    invoke<void>("update_highlight_color", { id, color }),
 
   // Settings & Secrets
   setApiKey: (key: string, provider?: string) =>

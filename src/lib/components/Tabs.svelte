@@ -151,4 +151,13 @@
     background: var(--bg-hover);
     color: var(--text-primary);
   }
+
+  @media (max-width: 600px) {
+    .shelf-btn span {
+      display: none;
+    }
+    .tab {
+      max-width: 140px;
+    }
+  }
 </style>

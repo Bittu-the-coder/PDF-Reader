@@ -1,6 +1,7 @@
 <script lang="ts">
   import { appState } from "../stores/appState.svelte";
   import { api, type Word, type Note, type Highlight } from "../api";
+  import { isUnderlineAnnotation, getAnnotationColorName, getColorDef } from "../pdf/highlights";
 
   let searchQuery = $state("");
   let newWordModal = $state(false);
@@ -289,6 +290,9 @@
       {:else}
         <div class="items-list">
           {#each sortedHighlights as h (h.id)}
+            {@const isUnderline = isUnderlineAnnotation(h.color)}
+            {@const colorName = getAnnotationColorName(h.color)}
+            {@const colorDef = getColorDef(h.color)}
             <div class="memory-card highlight-card {h.page === appState.currentPage ? 'current-page-card' : ''}">
               <div class="card-top">
                 <div class="tag-group">
@@ -300,13 +304,19 @@
                   >
                     {h.page === appState.currentPage ? `📍 Page ${h.page}` : `Page ${h.page}`}
                   </button>
-                  <span class="type-pill {h.color === 'underline' ? 'underline' : 'highlight'}">
-                    {h.color === 'underline' ? 'Underline' : 'Highlight'}
+                  <span class="type-pill {isUnderline ? 'underline' : 'highlight'}">
+                    <span class="color-dot-indicator" style="background: {colorDef?.color || '#facc15'};"></span>
+                    {isUnderline ? 'Underline' : 'Highlight'}
                   </span>
                 </div>
                 <button class="delete-btn" onclick={() => handleDeleteHighlight(h.id)} title="Delete annotation">×</button>
               </div>
-              <div class="highlight-text {h.color === 'underline' ? 'underline-text' : ''}">"{h.text}"</div>
+              <div
+                class="highlight-text {isUnderline ? 'underline-text' : ''}"
+                style="{isUnderline ? `border-bottom-color: ${colorDef?.color || '#facc15'};` : `border-left: 3px solid ${colorDef?.color || '#facc15'}; background: ${colorDef?.color || '#facc15'}18;`}"
+              >
+                "{h.text}"
+              </div>
             </div>
           {/each}
         </div>
@@ -700,5 +710,32 @@
     background: var(--accent);
     color: var(--accent-text);
     font-weight: 500;
+  }
+
+  .color-dot-indicator {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  .type-pill {
+    display: inline-flex;
+    align-items: center;
+  }
+
+  @media (max-width: 768px) {
+    .memory-drawer {
+      position: fixed;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: min(340px, 88vw);
+      z-index: 600;
+      box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
+      animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
   }
 </style>

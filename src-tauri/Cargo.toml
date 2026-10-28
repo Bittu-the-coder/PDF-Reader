@@ -14,13 +14,14 @@ tauri-build = { version = "2", features = [] }
 
 [features]
 default = ["desktop"]
-desktop = ["dep:tauri", "dep:tauri-plugin-opener", "dep:tauri-plugin-dialog", "dep:tauri-plugin-fs"]
+desktop = ["dep:tauri", "dep:tauri-plugin-opener", "dep:tauri-plugin-dialog", "dep:tauri-plugin-fs", "dep:tauri-plugin-single-instance"]
 
 [dependencies]
 tauri = { version = "2", optional = true , features = [] }
 tauri-plugin-opener = { version = "2", optional = true }
 tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-fs = { version = "2", optional = true }
+tauri-plugin-single-instance = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

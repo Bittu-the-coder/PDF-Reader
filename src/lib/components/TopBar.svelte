@@ -527,4 +527,16 @@
       display: none;
     }
   }
+
+  @media (max-width: 540px) {
+    .zoom-controls {
+      display: none;
+    }
+    .top-bar {
+      padding: 0 4px;
+    }
+    .mode-btn {
+      padding: 2px 4px;
+    }
+  }
 </style>
