@@ -1,7 +1,7 @@
 # Shelf — Minimalist AI-Powered PDF Reader 📚⚡
 
 <p align="center">
-  <img src="src/lib/assets/icon.png" alt="Shelf Logo" width="108" height="108" style="border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);" />
+  <img src="static/logo.png" alt="Shelf Logo" width="108" height="108" style="border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);" />
 </p>
 
 <p align="center">
@@ -18,16 +18,36 @@
 
 ---
 
+## 📸 Preview
+
+<p align="center">
+  <img src="static/ss1.png" alt="Shelf 3D Bookshelf Library" width="100%" />
+  <br>
+  <em>Figure 1: Interactive 3D Bookshelf Library with custom collections, book covers, and progress bookmarks.</em>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="static/ss2.png" alt="Shelf Contextual AI Lookup and Annotation Palettes" width="100%" />
+  <br>
+  <em>Figure 2: Reading view with the floating AI inquiry card, multilingual translation, and 6-color annotation palette.</em>
+</p>
+
+---
+
 ## 🌟 Why Shelf?
 
-Traditional PDF readers are either bloated with enterprise features or completely passive. **Shelf** is engineered from the ground up for deep reading, studying, and technical research:
+Traditional PDF readers are either bloated with enterprise clutter or completely passive. **Shelf** is engineered from the ground up for deep reading, studying, and technical research:
 
 - 🧠 **Instant AI Word & Passage Inquiry**: Select any word or passage to get instantaneous definitions, contextual grammar analysis, synonyms, or full paragraph explanations in your chosen language.
-- 💬 **Multi-Turn Contextual Chat**: Inquire further about any word or concept with AI conversational threads that remember the book's context.
-- 🖍️ **Resilient Annotations**: Highlights and underlines that don't corrupt the document text layer, supporting multi-color coding and overlapping spans.
-- 🗂️ **Book Memory & Spotlight Pop**: All your annotations, saved words, and custom notes are stored locally in SQLite. Clicking any note in the drawer jumps to the page and spotlights the exact text with an animated pulse.
-- 🌐 **Model Agnostic**: Bring your own keys — works with Google Gemini (`gemini-2.5-flash`, `gemini-3.5-flash-lite`, custom models) and OpenRouter (`deepseek-r1`, `mistral`, free tier models).
-- ⚡ **Lightweight & Private**: Sub-15MB native binary with offline-first local SQLite storage for all books, positions, notes, and vocabulary.
+- 💬 **Multi-Turn Inquire Chat**: Inquire further about any word or concept with AI conversational threads that remember the book's context without ever leaving the page.
+- 🖍️ **Seamless Line-Merged Annotations**: Intelligent line-clustering algorithm (`mergeLineRects`) eliminates word wireframe seams and double-track underlines, creating smooth marker fills and single crisp baseline strokes.
+- 🌈 **6-Color Vibrant Palettes**: Color-code highlights and underlines with Amber Yellow, Emerald Green, Sky Blue, Amethyst Purple, Rose Pink, and Sunset Orange.
+- 🗂️ **Book Memory & Spotlight Pulse**: All your annotations, saved words, and custom notes are stored locally in SQLite. Clicking any note in the drawer jumps directly to the page and spotlights the passage with an animated pulse.
+- 📚 **Interactive 3D Bookshelf**: Manage your reading list on an aesthetic wooden bookshelf with cover previews, reading progress bookmarks, and quick collection tabs.
+- 🌐 **Model Agnostic**: Bring your own keys — works with Google Gemini (`gemini-2.5-flash`, `gemini-3.5-flash-lite`, custom models) and OpenRouter (`deepseek-r1`, `mistral`, free-tier models).
+- ⚡ **Lightweight & Private**: Sub-10MB native Linux binary with offline-first local SQLite storage for all books, positions, notes, and vocabulary.
 
 ---
 
@@ -35,21 +55,19 @@ Traditional PDF readers are either bloated with enterprise features or completel
 
 Visit the [Releases Page](https://github.com/Bittu-the-coder/PDF-Reader/releases/latest) or choose your format below:
 
-### Ubuntu / Debian / Mint / Pop!_OS
+### Debian / Ubuntu / Linux Mint / Pop!_OS
 ```bash
-# Download the .deb package from Releases
-sudo dpkg -i shelf_0.1.0_amd64.deb
+sudo dpkg -i shelf_0.2.0_amd64.deb
 ```
 
-### Fedora / RHEL
+### Fedora / RHEL / openSUSE
 ```bash
-# Download the .rpm package from Releases
-sudo rpm -i shelf-0.1.0-1.x86_64.rpm
+sudo rpm -i shelf-0.2.0-1.x86_64.rpm
 ```
 
 ### Standalone Linux Binary
 ```bash
-tar -xzf shelf-v0.1.0-linux-x86_64.tar.gz
+tar -xzf shelf-v0.2.0-linux-x86_64.tar.gz
 ./shelf
 ```
 
@@ -59,17 +77,19 @@ tar -xzf shelf-v0.1.0-linux-x86_64.tar.gz
 
 ### 1. Contextual AI Inquire Card
 - **Draggable & Non-Intrusive**: Move the lookup card anywhere on screen so it never blocks your reading flow.
-- **Rich Markdown Formatting**: Generates clean bullet points, bold key terms, and organized paragraphs instead of wall-of-text responses.
-- **Passage Explanations**: Select multiple sentences or entire paragraphs to get synthesized summaries or simplified explanations.
+- **Multilingual Context**: Instant definitions paired with target-language translations (e.g. Hindi, Spanish, French, German).
+- **In-Place Chat**: Ask follow-up questions with quick prompt chips (*"Usage examples"*, *"Simpler terms"*, *"Etymology"*) powered by Gemini or OpenRouter.
 
-### 2. Annotation Engine
-- **Highlight & Underline**: Choose from 4 curated aesthetic colors (Golden Yellow, Mint Green, Coral Pink, Cyan).
-- **Text-Node Splitting**: Highlights wrap discrete DOM text nodes, allowing multiple highlights across the same sentence without rendering bugs.
-- **Page Jump Spotlight**: Clicking on a note or highlight in the Book Memory drawer auto-scrolls to the exact position and pulses with an animated golden zoom.
+### 2. Redesigned Annotation Engine
+- **Line Clustering**: Groups fragmented client rects from styled text (such as italics and dashes) into unified, seamless bounding boxes per visual line.
+- **Single-Track Underlines**: Unified baseline drawing eliminates duplicate parallel underline artifacts.
+- **Floating Action Toolbar**: Click any existing highlight or underline to quickly switch colors, toggle between highlight and underline, copy the text, or delete the annotation.
+- **Retroactive Rendering**: Automatically clusters and renders all existing annotations stored in your local SQLite database without manual migrations.
 
-### 3. Responsive Dual-Header Layout
-- **Reading Toolbar**: Quick-toggle zoom (`Ctrl +` / `Ctrl -`), responsive fit-to-width, single/dual page view, and distraction-free fullscreen mode.
-- **Smart Toggle & Pin**: Easily hide or pin navigation toolbars according to your screen size.
+### 3. Reading Modes & Themes
+- **Flexible Layouts**: Switch seamlessly between **Single Page**, **Two Pages (Dual Spread)**, and **Continuous Vertical Scroll**.
+- **Adaptive Themes**: Optimized reading contrast with **Light**, **Sepia**, **Eye Care**, **Dark**, and **Invert** modes.
+- **OS Desktop Integration**: Pre-configured `.desktop` entry with `application/pdf` MIME type association for opening files directly or setting Shelf as your default PDF viewer.
 
 ---
 
@@ -79,7 +99,7 @@ tar -xzf shelf-v0.1.0-linux-x86_64.tar.gz
 | :--- | :--- |
 | `Ctrl` + `O` | Open new PDF document |
 | `Ctrl` + `F` / `F` | Toggle Fullscreen mode |
-| `Esc` | Exit Fullscreen / Close active modals |
+| `Esc` | Exit Fullscreen / Close active dialogs |
 | `Ctrl` + `+` / `Ctrl` + `=` | Zoom In |
 | `Ctrl` + `-` | Zoom Out |
 | `Ctrl` + `0` | Reset Zoom to 100% |
@@ -115,7 +135,7 @@ npm run tauri dev
 ```bash
 npm run tauri build
 ```
-Binaries and distribution packages will be created in `src-tauri/target/release/bundle/`.
+Binaries and distribution packages (`.deb`, `.rpm`) are generated in `src-tauri/target/release/bundle/`.
 
 ---
 
@@ -126,7 +146,7 @@ Binaries and distribution packages will be created in `src-tauri/target/release/
 - **Backend**: [Rust](https://www.rust-lang.org/)
 - **PDF Engine**: [PDF.js](https://mozilla.github.io/pdf.js/) (Custom canvas rendering and text-layer mapping)
 - **Database**: [SQLite](https://www.sqlite.org/) via `rusqlite`
-- **AI Integrations**: Native HTTP client with streaming JSON for Google Gemini and OpenRouter
+- **AI Integrations**: Streaming HTTP client for Google Gemini and OpenRouter
 
 ---
 
