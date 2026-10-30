@@ -247,3 +247,55 @@ fn test_auto_assign_chapter_by_page() {
         .unwrap();
     assert_eq!(n1.chapter_id, Some(ch3.id));
 }
+
+#[test]
+fn test_bookmarks_and_review() {
+    let db = setup_test_db();
+    let book = db
+        .add_book(
+            &AddBook {
+                title: "Test".into(),
+                author: None,
+                file_path: "/tmp/test.pdf".into(),
+                file_hash: "hash-review".into(),
+                page_count: Some(10),
+                cover_png: None,
+            },
+            None,
+        )
+        .unwrap();
+
+    db.add_bookmark(book.id, 3, None).unwrap();
+    db.add_bookmark(book.id, 3, Some("again")).unwrap();
+    db.add_bookmark(book.id, 7, None).unwrap();
+    let marks = db.list_bookmarks(book.id).unwrap();
+    assert_eq!(marks.iter().map(|b| b.page).collect::<Vec<_>>(), vec![3, 7]);
+    db.delete_bookmark(book.id, 3).unwrap();
+    assert_eq!(db.list_bookmarks(book.id).unwrap().len(), 1);
+
+    let word = db
+        .add_word(&AddWord {
+            book_id: book.id,
+            chapter_id: None,
+            word: "ephemeral".into(),
+            meaning: "short-lived".into(),
+            meaning_hindi: None,
+            example_sentence: None,
+            page: Some(1),
+            ai_generated: None,
+        })
+        .unwrap();
+
+    // New words are due immediately; a "good" review schedules them a day out
+    assert_eq!(db.count_due_cards(Some(book.id)).unwrap(), 1);
+    db.review_card(word.id, Grade::Good).unwrap();
+    assert_eq!(db.count_due_cards(Some(book.id)).unwrap(), 0);
+
+    assert_eq!(next_stability(0.0, Grade::Good), 1.0);
+    assert_eq!(next_stability(2.0, Grade::Good), 5.0);
+    assert_eq!(next_stability(5.0, Grade::Again), 0.0);
+
+    db.log_reading(book.id, 120, 4).unwrap();
+    let stats = db.reading_stats(book.id).unwrap();
+    assert_eq!((stats.seconds, stats.pages), (120, 4));
+}

@@ -1,6 +1,25 @@
 <script lang="ts">
   import { appState } from "../stores/appState.svelte";
   import { api } from "../api";
+  import Icon from "./Icon.svelte";
+
+  async function openExternal(url: string) {
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+    } catch {
+      window.open(url, "_blank", "noopener");
+    }
+  }
+
+  async function confirmRemove(message: string) {
+    try {
+      const { ask } = await import("@tauri-apps/plugin-dialog");
+      return await ask(message, { title: "Remove API key", kind: "warning", okLabel: "Remove", cancelLabel: "Cancel" });
+    } catch {
+      return confirm(message);
+    }
+  }
 
   let activeProvider = $state<"gemini" | "openrouter">(appState.aiProvider || "gemini");
   let apiKeyInput = $state("");
@@ -137,7 +156,7 @@
       }
       await appState.checkApiKey();
       apiKeyInput = "";
-      testStatus = { type: "success", message: `${activeProvider === "openrouter" ? "OpenRouter" : "Gemini"} key securely saved to OS keychain!` };
+      testStatus = { type: "success", message: `${activeProvider === "openrouter" ? "OpenRouter" : "Gemini"} key saved.` };
       setTimeout(() => {
         appState.settingsModalOpen = false;
       }, 700);
@@ -151,10 +170,10 @@
 
   async function handleRemoveKey() {
     const provName = activeProvider === "openrouter" ? "OpenRouter" : "Gemini";
-    if (confirm(`Are you sure you want to remove your stored ${provName} API key from the keychain?`)) {
+    if (await confirmRemove(`Remove your saved ${provName} API key from this computer?`)) {
       await api.clearApiKey(activeProvider);
       await appState.checkApiKey();
-      testStatus = { type: "success", message: `${provName} key removed from keychain.` };
+      testStatus = { type: "success", message: `${provName} key removed.` };
     }
   }
 
@@ -235,13 +254,12 @@
     >
       <div class="modal-header">
         <div class="header-title">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
-            <circle cx="12" cy="12" r="3"/>
-          </svg>
-          <h2>Reader Settings</h2>
+          <Icon name="settings" size={19} />
+          <h2>Settings</h2>
         </div>
-        <button class="close-btn" onclick={() => (appState.settingsModalOpen = false)}>×</button>
+        <button class="icon-btn" onclick={() => (appState.settingsModalOpen = false)} aria-label="Close settings" title="Close (Esc)">
+          <Icon name="x" size={18} />
+        </button>
       </div>
 
       <div class="modal-body">
@@ -251,13 +269,13 @@
             class="prov-tab {activeProvider === 'gemini' ? 'active' : ''}"
             onclick={() => handleProviderSwitch('gemini')}
           >
-            <span class="prov-icon">✨</span>
+            <span class="prov-icon"><Icon name="sparkles" size={18} /></span>
             <div class="prov-text">
               <span class="prov-name">Google Gemini</span>
               <span class="prov-desc">Direct Google AI Studio API</span>
             </div>
             {#if appState.hasGeminiKey}
-              <span class="key-pill active">✓ Saved</span>
+              <span class="key-pill active"><Icon name="check" size={11} strokeWidth={3} /> Key</span>
             {/if}
           </button>
 
@@ -265,13 +283,13 @@
             class="prov-tab {activeProvider === 'openrouter' ? 'active' : ''}"
             onclick={() => handleProviderSwitch('openrouter')}
           >
-            <span class="prov-icon">🌐</span>
+            <span class="prov-icon"><Icon name="globe" size={18} /></span>
             <div class="prov-text">
               <span class="prov-name">OpenRouter</span>
               <span class="prov-desc">Free & Open-Source Models</span>
             </div>
             {#if appState.hasOpenrouterKey}
-              <span class="key-pill active">✓ Saved</span>
+              <span class="key-pill active"><Icon name="check" size={11} strokeWidth={3} /> Key</span>
             {/if}
           </button>
         </div>
@@ -282,8 +300,8 @@
           <div class="status-text">
             <strong>{activeProvider === 'openrouter' ? 'OpenRouter' : 'Google Gemini'}:</strong>
             {isCurrentProviderConfigured
-              ? "Key configured & active in OS keychain"
-              : "No key configured (AI Lookups & Chat disabled)"}
+              ? "API key saved. Word lookups are ready."
+              : "No API key yet. Lookups and chat are off until you add one."}
           </div>
           {#if isCurrentProviderConfigured}
             <button class="btn-danger-sm" onclick={handleRemoveKey}>Remove</button>
@@ -295,13 +313,13 @@
           <label for="provider-key">
             <span>{activeProvider === 'openrouter' ? 'OpenRouter API Key' : 'Google Gemini API Key'}</span>
             {#if activeProvider === 'openrouter'}
-              <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" class="link-help">
-                Get key at OpenRouter.ai ↗
-              </a>
+              <button type="button" class="link-help" onclick={() => openExternal("https://openrouter.ai/keys")}>
+                Get a key at openrouter.ai <Icon name="external" size={12} />
+              </button>
             {:else}
-              <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" class="link-help">
-                Get free key at Google AI Studio ↗
-              </a>
+              <button type="button" class="link-help" onclick={() => openExternal("https://aistudio.google.com/app/apikey")}>
+                Get a free key at Google AI Studio <Icon name="external" size={12} />
+              </button>
             {/if}
           </label>
           <div class="input-with-actions">
@@ -318,7 +336,7 @@
               onclick={() => (showKey = !showKey)}
               title={showKey ? "Hide key" : "Show key"}
             >
-              {showKey ? "👁️" : "🔒"}
+              <Icon name={showKey ? "eye-off" : "eye"} size={16} />
             </button>
           </div>
         </div>
@@ -413,11 +431,11 @@
 
         <!-- Privacy & Security Guarantee -->
         <div class="privacy-note">
-          <div class="note-icon">🛡️</div>
+          <div class="note-icon"><Icon name="key" size={18} /></div>
           <div class="note-content">
-            <p class="note-title">Local-First & Secure Keychain</p>
+            <p class="note-title">Private by default</p>
             <p class="note-body">
-              Your API keys are stored securely in your OS keychain (via <code>keyring</code>) and never written to disk unencrypted. Only words or passages you select are transmitted to your chosen AI provider.
+              Your books, notes and highlights never leave this computer. API keys are kept in the system credential store (Windows Credential Manager, macOS Keychain or Secret Service on Linux), or in a private file in the app's data folder if none is available. Only the text you look up is sent to your AI provider.
             </p>
           </div>
         </div>
@@ -429,14 +447,14 @@
           onclick={handleTestKey}
           disabled={isTesting || !apiKeyInput.trim()}
         >
-          {isTesting ? "Testing..." : `Test ${activeProvider === 'openrouter' ? 'OpenRouter' : 'Gemini'} Key`}
+          {isTesting ? "Testing…" : "Test key"}
         </button>
         <button
           class="btn-primary"
           onclick={handleSaveKey}
           disabled={isSaving || !apiKeyInput.trim()}
         >
-          {isSaving ? "Saving..." : "Save Key to Keychain"}
+          {isSaving ? "Saving…" : "Save key"}
         </button>
       </div>
     </div>
@@ -447,8 +465,8 @@
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(6px);
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -467,8 +485,9 @@
     border: 1px solid var(--border-subtle, #33333f);
     border-radius: var(--radius-lg, 12px);
     width: 100%;
-    max-width: 540px;
-    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.55);
+    max-width: 560px;
+    max-height: calc(100vh - 32px);
+    box-shadow: var(--shadow-lg);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -495,28 +514,15 @@
     font-weight: 600;
   }
 
-  .close-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary, #999);
-    font-size: 20px;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 4px;
-    line-height: 1;
-  }
 
-  .close-btn:hover {
-    color: var(--text-primary);
-    background: var(--bg-hover);
-  }
 
   .modal-body {
     padding: 20px;
     display: flex;
     flex-direction: column;
     gap: 16px;
-    max-height: 80vh;
+    min-height: 0;
+    flex: 1;
     overflow-y: auto;
   }
 
@@ -659,15 +665,7 @@
     line-height: 1.4;
   }
 
-  .link-help {
-    font-size: 11.5px;
-    color: var(--accent);
-    text-decoration: none;
-  }
 
-  .link-help:hover {
-    text-decoration: underline;
-  }
 
   .input-with-actions {
     position: relative;
@@ -788,12 +786,6 @@
     color: var(--text-secondary);
   }
 
-  .note-body code {
-    background: var(--bg-surface);
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-size: 10.5px;
-  }
 
   .modal-footer {
     display: flex;
@@ -844,5 +836,43 @@
   .btn-primary:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .link-help {
+    gap: 4px;
+    padding: 0;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent);
+  }
+
+  .link-help:hover {
+    text-decoration: underline;
+  }
+
+  .prov-icon {
+    display: flex;
+    color: var(--accent);
+  }
+
+  .note-icon {
+    color: var(--accent);
+  }
+
+  @media (max-width: 560px) {
+    .modal-backdrop {
+      padding: 0;
+      align-items: flex-end;
+    }
+    .settings-modal {
+      max-height: 92vh;
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    }
+    .provider-tabs {
+      flex-direction: column;
+    }
+    .modal-footer {
+      flex-wrap: wrap;
+    }
   }
 </style>

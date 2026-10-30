@@ -1,8 +1,8 @@
 [package]
 name = "shelf"
-version = "0.2.0"
+version = "0.3.0"
 description = "A minimal, memory-first PDF reader"
-authors = ["you"]
+authors = ["Bittu-the-coder"]
 edition = "2024"
 
 [lib]
@@ -40,17 +40,24 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Secret storage
-keyring = { version = "3", features = ["linux-native"] }
-
-# Audio
-rodio = "0.20"
-
 # Hashing (for file SHA-256)
 sha2 = "0.10"
 
 # Chrono for timestamps
 chrono = { version = "0.4", features = ["serde"] }
+
+# Secret storage: the OS credential store on each platform
+# (Windows Credential Manager, macOS Keychain, Secret Service on Linux).
+[target.'cfg(target_os = "linux")'.dependencies]
+# Used to route touchpad pinch gestures to the PDF instead of zooming the whole UI
+gtk = "0.18"
+keyring = { version = "3", features = ["linux-native-sync-persistent", "crypto-rust"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
 
 [dev-dependencies]
 tempfile = "3"

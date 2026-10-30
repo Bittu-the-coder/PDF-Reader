@@ -282,7 +282,7 @@ export function resolveHighlightRects(
               const idx = text.indexOf(targetLower);
               if (idx !== -1) {
                 // Find exact range within span's text nodes
-                const rects = getTextNodesRangeRects(span, target.length);
+                const rects = getSubstringRects(span, idx, targetLower.length);
                 if (rects.length > 0) {
                   rawRects = rects.map((r) => normalizeRect(r, pageRect));
                   break;
@@ -347,14 +347,84 @@ function normalizeRect(r: DOMRect, pageRect: DOMRect): NormalizedRect {
   };
 }
 
-function getTextNodesRangeRects(container: HTMLElement, length: number): DOMRect[] {
+/**
+ * Client rects of the substring [start, start+length) of a text-layer span.
+ * Offsets are in whitespace-collapsed characters, matching how the caller searched.
+ */
+function getSubstringRects(span: HTMLElement, start: number, length: number): DOMRect[] {
+  const node = span.firstChild;
+  if (!node || node.nodeType !== Node.TEXT_NODE) return [];
+  const raw = node.textContent || "";
+
+  // Map collapsed-whitespace offsets back to raw offsets
+  const map: number[] = [];
+  let prevSpace = false;
+  for (let i = 0; i < raw.length; i++) {
+    const isSpace = /\s/.test(raw[i]);
+    if (isSpace && prevSpace) continue;
+    map.push(i);
+    prevSpace = isSpace;
+  }
+  map.push(raw.length);
+  const rawStart = map[Math.min(start, map.length - 1)];
+  const rawEnd = map[Math.min(start + length, map.length - 1)];
+  if (rawEnd <= rawStart) return [];
+
   try {
     const range = document.createRange();
-    range.selectNodeContents(container);
+    range.setStart(node, rawStart);
+    range.setEnd(node, rawEnd);
     return Array.from(range.getClientRects()).filter((r) => r.width > 1 && r.height > 1);
   } catch {
     return [];
   }
+}
+
+/**
+ * Briefly pulse a marker over `text` on the given page, then scroll it into view.
+ * Draws in the annotation layer so the pdf.js text spans (and their transforms)
+ * are never touched. Returns false when the text is not on the rendered page yet.
+ */
+export function spotlightText(pageContainer: HTMLElement, text: string, highlights: Highlight[]): boolean {
+  const annotationLayer = pageContainer.querySelector(".annotation-layer") as HTMLElement | null;
+  const textLayer = pageContainer.querySelector(".textLayer") as HTMLElement | null;
+  if (!annotationLayer || !textLayer || !textLayer.querySelector("span")) return false;
+
+  const pageNum = Number(pageContainer.dataset.page);
+  const needle = text.trim().replace(/\s+/g, " ").slice(0, 160);
+  if (!needle) return false;
+
+  // Prefer the stored geometry of a matching highlight, then fall back to a text search
+  const match = highlights.find(
+    (h) => h.page === pageNum && h.text.trim().replace(/\s+/g, " ").toLowerCase().startsWith(needle.toLowerCase().slice(0, 60))
+  );
+  let rects = resolveHighlightRects(
+    match ?? ({ id: -1, page: pageNum, text: needle, rects_json: "", color: "yellow" } as Highlight),
+    textLayer
+  );
+  if (rects.length === 0 && needle.length > 40) {
+    // Long quotes often span several text-layer lines; retry with the opening words
+    rects = resolveHighlightRects(
+      { id: -1, page: pageNum, text: needle.split(" ").slice(0, 5).join(" "), rects_json: "", color: "yellow" } as Highlight,
+      textLayer
+    );
+  }
+  if (rects.length === 0) return false;
+
+  const boxes: HTMLElement[] = [];
+  for (const rect of rects) {
+    const box = document.createElement("div");
+    box.className = "pdf-spotlight";
+    box.style.left = `${(rect.x * 100).toFixed(3)}%`;
+    box.style.top = `${(rect.y * 100).toFixed(3)}%`;
+    box.style.width = `${(rect.width * 100).toFixed(3)}%`;
+    box.style.height = `${(rect.height * 100).toFixed(3)}%`;
+    annotationLayer.appendChild(box);
+    boxes.push(box);
+  }
+  boxes[0].scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+  setTimeout(() => boxes.forEach((b) => b.remove()), 2600);
+  return true;
 }
 
 /**
@@ -373,8 +443,8 @@ export function applyHighlightsToAnnotationLayer(
     textLayerDiv = annotationLayerEl.parentElement.querySelector(".textLayer") as HTMLElement | null;
   }
 
-  // Clear existing annotation boxes
-  annotationLayerEl.innerHTML = "";
+  // Clear existing annotation boxes (keep any running spotlight pulse)
+  annotationLayerEl.querySelectorAll(".pdf-annotation-rect").forEach((el) => el.remove());
 
   const pageHighlights = highlights.filter((h) => h.page === pageNum);
   if (pageHighlights.length === 0) return;
@@ -406,14 +476,6 @@ export function applyHighlightsToAnnotationLayer(
         box.style.setProperty("border-bottom-color", colorDef.underlineColor, "important");
       } else {
         box.style.setProperty("background-color", colorDef.highlightBg, "important");
-      }
-
-      if (onHighlightClick) {
-        box.onclick = (e) => {
-          e.stopPropagation();
-          const domRect = box.getBoundingClientRect();
-          onHighlightClick(h, domRect);
-        };
       }
 
       annotationLayerEl.appendChild(box);

@@ -1,9 +1,15 @@
-import { api, type Book, type BookSummary, type Chapter, type Highlight, type Note, type Shelf, type Word } from "../api";
+import { api, type Book, type Bookmark, type BookSummary, type Chapter, type Highlight, type Note, type Shelf, type Word } from "../api";
+import type { OutlineNode } from "../pdf/pdfViewer";
+import type { SearchMatch } from "../pdf/search";
 
 export type Theme = "dark" | "light" | "sepia" | "eyecare" | "invert";
 export type FitMode = "width" | "page" | "custom";
 export type ReadingMode = "single" | "dual" | "scroll";
 export type MemoryTab = "words" | "notes" | "highlights";
+
+function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/").toLowerCase();
+}
 
 export interface OpenTab {
   book: Book;
@@ -55,6 +61,33 @@ class AppState {
   // Fullscreen state
   isFullscreen = $state<boolean>(false);
 
+  // Window & reader viewport size, used for responsive layout decisions
+  windowWidth = $state<number>(typeof window !== "undefined" ? window.innerWidth : 1280);
+  windowHeight = $state<number>(typeof window !== "undefined" ? window.innerHeight : 800);
+  readerWidth = $state<number>(0);
+  readerHeight = $state<number>(0);
+
+  /** Two-page spreads are unreadable in narrow windows, so fall back to single pages there. */
+  get layoutMode(): ReadingMode {
+    if (this.readingMode === "dual" && this.readerWidth > 0 && this.readerWidth < 760) {
+      return "single";
+    }
+    return this.readingMode;
+  }
+
+  /** Pages to advance per step in the current layout. */
+  get pageStep(): number {
+    return this.layoutMode === "dual" ? 2 : 1;
+  }
+
+  get isCompact(): boolean {
+    return this.windowWidth < 720;
+  }
+
+  // Transient toast message (e.g. "Highlight removed", errors)
+  toast = $state<{ message: string; kind: "info" | "error"; token: number } | null>(null);
+  private toastTimer: any = null;
+
   // Selection & Lookup Card
   selectedText = $state<string>("");
   selectedSentence = $state<string>("");
@@ -65,9 +98,33 @@ class AppState {
   activeHighlight = $state<Highlight | null>(null);
   activeHighlightRect = $state<{ top: number; left: number; width: number; height: number } | null>(null);
   
-  // In-document Search
+  // In-document search
   searchQuery = $state<string>("");
   searchOpen = $state<boolean>(false);
+  searchMatches = $state<SearchMatch[]>([]);
+  searchIndex = $state<number>(-1);
+  searchScanning = $state<boolean>(false);
+  /** Bumped to ask the search bar to focus its input */
+  searchFocusToken = $state<number>(0);
+
+  // Bookmarks & table of contents
+  bookmarks = $state<Bookmark[]>([]);
+  outline = $state<OutlineNode[]>([]);
+
+  /** Pages we jumped away from (links, search, contents), for "Back" */
+  backStack = $state<number[]>([]);
+
+  // Dialogs
+  reviewOpen = $state<boolean>(false);
+  shortcutsOpen = $state<boolean>(false);
+  dueCount = $state<number>(0);
+
+  // Reading-time tracking (flushed to the database periodically)
+  readingStats = $state<{ seconds: number; pages: number }>({ seconds: 0, pages: 0 });
+  private pendingSeconds = 0;
+  private pendingPages = 0;
+  private lastPageTurnAt = 0;
+  private lastTrackedPage = 0;
 
   // Settings & AI Providers
   settingsModalOpen = $state<boolean>(false);
@@ -183,6 +240,15 @@ class AppState {
     }
   }
 
+  showToast(message: string, kind: "info" | "error" = "info") {
+    clearTimeout(this.toastTimer);
+    const token = Date.now();
+    this.toast = { message, kind, token };
+    this.toastTimer = setTimeout(() => {
+      if (this.toast?.token === token) this.toast = null;
+    }, kind === "error" ? 4200 : 2200);
+  }
+
   flashText(text: string) {
     this.flashTargetText = text;
     setTimeout(() => {
@@ -218,6 +284,63 @@ class AppState {
     this.debouncedSaveZoom();
   }
 
+  // -------------------------------------------------------------------------
+  // Pinch / Ctrl+scroll zoom gestures
+  //
+  // While a gesture runs, `pinchZoom` holds the zoom the reader should *look*
+  // like; the Reader fakes it with a cheap CSS transform of the pages it already
+  // rendered. When the gesture ends, `zoom` is committed once (one re-render),
+  // and the Reader clears `pinchZoom` as soon as that render is on screen, so
+  // the page never snaps back to the old size in between.
+  // -------------------------------------------------------------------------
+
+  pinchZoom = $state<number | null>(null);
+  pinchActive = $state<boolean>(false);
+  private pinchBaseZoom = 1;
+  private pinchEndTimer: any = null;
+
+  private clampZoom(z: number) {
+    return Math.max(0.4, Math.min(3.0, z));
+  }
+
+  beginPinch() {
+    clearTimeout(this.pinchEndTimer);
+    if (this.pinchActive) return;
+    this.pinchActive = true;
+    this.pinchBaseZoom = this.pinchZoom ?? this.zoom;
+  }
+
+  /** `scale` is relative to the zoom when the gesture began. */
+  updatePinch(scale: number) {
+    if (!this.pinchActive) this.beginPinch();
+    this.pinchZoom = this.clampZoom(this.pinchBaseZoom * scale);
+  }
+
+  endPinch() {
+    clearTimeout(this.pinchEndTimer);
+    if (!this.pinchActive) return;
+    this.pinchActive = false;
+    if (this.pinchZoom == null) return;
+    const target = Number(this.pinchZoom.toFixed(2));
+    if (target === this.zoom) {
+      this.pinchZoom = null;
+      return;
+    }
+    this.fitMode = "custom";
+    this.zoom = target;
+    this.debouncedSaveZoom();
+  }
+
+  /** Ctrl+scroll, and touchpad pinch on Windows/macOS (delivered as ctrl+wheel). */
+  wheelZoom(deltaY: number) {
+    this.beginPinch();
+    const current = this.pinchZoom ?? this.zoom;
+    // Pinch sends many small deltas (smooth); mouse-wheel notches are capped per event
+    const factor = Math.max(0.8, Math.min(1.25, Math.exp(-deltaY * 0.01)));
+    this.pinchZoom = this.clampZoom(current * factor);
+    this.pinchEndTimer = setTimeout(() => this.endPinch(), 180);
+  }
+
   setFitMode(mode: FitMode) {
     this.fitMode = mode;
   }
@@ -225,8 +348,9 @@ class AppState {
   // Load Library & Shelves
   async refreshLibrary() {
     try {
-      this.shelves = await api.listShelves();
-      this.books = await api.listBooks(this.activeShelfId);
+      const [shelves, books] = await Promise.all([api.listShelves(), api.listBooks(this.activeShelfId)]);
+      this.shelves = shelves;
+      this.books = books;
     } catch (err) {
       console.error("Failed to load library:", err);
     }
@@ -239,11 +363,22 @@ class AppState {
 
   // Open Book
   async openBook(bookId: number) {
+    if (this.currentView === "reader" && this.activeBook?.id === bookId) return;
     try {
       const book = await api.getBook(bookId);
       this.activeBook = book;
       this.currentPage = Math.max(1, book.last_page || 1);
       this.zoom = book.last_zoom || 1.0;
+      this.lookupCardVisible = false;
+      this.activeHighlight = null;
+      this.activeHighlightRect = null;
+      this.flushReadingTime();
+      this.closeSearch();
+      this.searchQuery = "";
+      this.backStack = [];
+      this.outline = [];
+      this.bookmarks = [];
+      this.loadReadingStats(book.id);
       this.currentView = "reader";
 
       // Add to open tabs if not present
@@ -257,47 +392,64 @@ class AppState {
     }
   }
 
+  /** Status text while a PDF is being imported, null when idle. */
+  importStatus = $state<string | null>(null);
+
+  /**
+   * Open a PDF from disk: reuse the library entry when the file is known,
+   * otherwise import it (cover, outline) and open it.
+   */
   async openPdfFilePath(filePath: string) {
-    if (!filePath || !filePath.trim()) return;
+    if (!filePath || !filePath.trim() || this.importStatus) return;
     try {
+      this.importStatus = "Reading PDF…";
       await this.refreshLibrary();
-      // Check if file already exists in library
-      const existing = this.books.find(
-        (b) => b.file_path === filePath || b.file_path.toLowerCase() === filePath.toLowerCase()
-      );
+      const normalized = normalizePath(filePath);
+      const existing = this.books.find((b) => normalizePath(b.file_path) === normalized);
       if (existing) {
         await this.openBook(existing.id);
         return;
       }
 
-      // Read and register new PDF into the library
-      const bytes = await api.readPdfBytes(filePath);
-      const masterBytes = new Uint8Array(bytes);
+      const masterBytes = await api.readPdfBytes(filePath);
       const fileName = filePath.split(/[/\\]/).pop()?.replace(/\.pdf$/i, "") || "Document";
+      await this.importPdfBytes(masterBytes, filePath, fileName);
+    } catch (err: any) {
+      console.error("Failed to open PDF from path:", err);
+      this.showToast(`Could not open PDF: ${err?.message || err}`, "error");
+    } finally {
+      this.importStatus = null;
+    }
+  }
 
-      const { PDFViewer } = await import("../pdf/pdfViewer");
-      const viewer = new PDFViewer();
-      const pageCount = await viewer.load(masterBytes.slice());
+  /** Register already-loaded PDF bytes in the library and open the book. */
+  async importPdfBytes(masterBytes: Uint8Array, filePath: string, title: string) {
+    this.importStatus = "Reading pages & chapters…";
+    const { PDFViewer } = await import("../pdf/pdfViewer");
+    const viewer = new PDFViewer();
+    try {
+      const pageCount = await viewer.load(masterBytes);
       const coverPng = await viewer.generateCoverPng();
       const outline = await viewer.extractOutline();
 
+      this.importStatus = "Adding to library…";
       const book = await api.addBook({
         path: filePath,
         shelfId: this.activeShelfId,
-        title: fileName,
+        title,
         pageCount,
         coverPng,
       });
 
       if (outline.length > 0) {
-        await api.importOutline(book.id, outline);
+        await api.importOutline(book.id, outline).catch((e) => console.warn("Outline import failed:", e));
       }
 
       this.docBufferCache.set(book.id, masterBytes);
       await this.refreshLibrary();
       await this.openBook(book.id);
-    } catch (err) {
-      console.error("Failed to open PDF from path:", err);
+    } finally {
+      viewer.destroy();
     }
   }
 
@@ -313,6 +465,8 @@ class AppState {
   }
 
   goToShelf() {
+    this.flushReadingTime();
+    this.closeSearch();
     this.currentView = "shelf";
     this.activeBook = null;
     this.refreshLibrary();
@@ -320,19 +474,99 @@ class AppState {
 
   async refreshBookMemory(bookId: number) {
     try {
-      this.chapters = await api.listChapters(bookId);
-      this.words = await api.listWords(bookId);
-      this.notes = await api.listNotes(bookId);
-      this.highlights = await api.listHighlights(bookId);
+      const [chapters, words, notes, highlights, bookmarks] = await Promise.all([
+        api.listChapters(bookId),
+        api.listWords(bookId),
+        api.listNotes(bookId),
+        api.listHighlights(bookId),
+        api.listBookmarks(bookId).catch(() => [] as Bookmark[]),
+      ]);
+      // Ignore late results if the user switched books meanwhile
+      if (this.activeBook && this.activeBook.id !== bookId) return;
+      this.chapters = chapters;
+      this.words = words;
+      this.notes = notes;
+      this.highlights = highlights;
+      this.bookmarks = bookmarks;
+      this.refreshDueCount();
     } catch (err) {
       console.error("Failed to refresh book memory:", err);
     }
   }
 
+  async addHighlight(input: { page: number; text: string; rects: { x: number; y: number; width: number; height: number }[]; color: string }) {
+    const book = this.activeBook;
+    if (!book) return;
+    const tempId = -Date.now();
+    const rectsJson = JSON.stringify(input.rects);
+    const optimistic: Highlight = {
+      id: tempId,
+      book_id: book.id,
+      page: input.page,
+      color: input.color,
+      text: input.text,
+      rects_json: rectsJson,
+      note_id: null,
+      created_at: new Date().toISOString(),
+    };
+    this.highlights = [...this.highlights, optimistic];
+    try {
+      const saved = await api.addHighlight({
+        bookId: book.id,
+        page: input.page,
+        text: input.text,
+        rectsJson,
+        color: input.color,
+      });
+      this.highlights = this.highlights.map((h) => (h.id === tempId ? saved : h));
+    } catch (err) {
+      this.highlights = this.highlights.filter((h) => h.id !== tempId);
+      this.showToast("Could not save the highlight.", "error");
+      console.error("Failed to add highlight:", err);
+    }
+  }
+
+  async setHighlightColor(id: number, color: string) {
+    const prev = this.highlights;
+    this.highlights = this.highlights.map((h) => (h.id === id ? { ...h, color } : h));
+    if (this.activeHighlight?.id === id) this.activeHighlight = { ...this.activeHighlight, color };
+    try {
+      await api.updateHighlightColor(id, color);
+    } catch (err) {
+      this.highlights = prev;
+      this.showToast("Could not update the highlight.", "error");
+      console.error("Failed to update highlight color:", err);
+    }
+  }
+
+  async removeHighlight(id: number) {
+    const prev = this.highlights;
+    this.highlights = this.highlights.filter((h) => h.id !== id);
+    if (this.activeHighlight?.id === id) {
+      this.activeHighlight = null;
+      this.activeHighlightRect = null;
+    }
+    try {
+      await api.deleteHighlight(id);
+      this.showToast("Annotation removed");
+    } catch (err) {
+      this.highlights = prev;
+      this.showToast("Could not remove the annotation.", "error");
+      console.error("Failed to delete highlight:", err);
+    }
+  }
+
   jumpEvent = $state<{ page: number; textToFlash?: string; token: number } | null>(null);
 
-  jumpToPage(page: number, textToFlash?: string) {
+  /**
+   * Go to a page. `remember` records the current page so the reader can come
+   * back (used for link, search and contents jumps).
+   */
+  jumpToPage(page: number, textToFlash?: string, remember = false) {
     const target = Math.max(1, Math.min(this.pageCount || 1, page));
+    if (remember && target !== this.currentPage) {
+      this.backStack = [...this.backStack.slice(-19), this.currentPage];
+    }
     this.currentPage = target;
     if (this.activeBook) {
       api.saveProgress(this.activeBook.id, target, this.zoom).catch(console.error);
@@ -341,6 +575,155 @@ class AppState {
       this.flashText(textToFlash);
     }
     this.jumpEvent = { page: target, textToFlash, token: Date.now() };
+  }
+
+  goBack() {
+    const prev = this.backStack[this.backStack.length - 1];
+    if (prev == null) return;
+    this.backStack = this.backStack.slice(0, -1);
+    this.jumpToPage(prev);
+  }
+
+  // -------------------------------------------------------------------------
+  // Bookmarks
+  // -------------------------------------------------------------------------
+
+  isBookmarked(page: number) {
+    return this.bookmarks.some((b) => b.page === page);
+  }
+
+  async toggleBookmark(page = this.currentPage) {
+    const book = this.activeBook;
+    if (!book) return;
+    const exists = this.isBookmarked(page);
+    try {
+      if (exists) {
+        await api.deleteBookmark(book.id, page);
+        this.bookmarks = this.bookmarks.filter((b) => b.page !== page);
+        this.showToast(`Bookmark on page ${page} removed`);
+      } else {
+        await api.addBookmark(book.id, page, this.chapterTitleFor(page));
+        this.bookmarks = await api.listBookmarks(book.id);
+        this.showToast(`Page ${page} bookmarked`);
+      }
+    } catch (err) {
+      this.showToast("Could not update the bookmark.", "error");
+      console.error("Bookmark toggle failed:", err);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Table of contents
+  // -------------------------------------------------------------------------
+
+  /** All outline entries with a page, in document order. */
+  get outlineFlat(): OutlineNode[] {
+    const out: OutlineNode[] = [];
+    const walk = (nodes: OutlineNode[]) => {
+      for (const n of nodes) {
+        if (n.page) out.push(n);
+        walk(n.children);
+      }
+    };
+    walk(this.outline);
+    return out.sort((a, b) => (a.page ?? 0) - (b.page ?? 0));
+  }
+
+  chapterTitleFor(page: number): string | null {
+    let title: string | null = null;
+    for (const n of this.outlineFlat) {
+      if ((n.page ?? Infinity) <= page) title = n.title;
+      else break;
+    }
+    return title;
+  }
+
+  /** First page of the next outline entry after `page`, or the end of the book. */
+  chapterEndFor(page: number): number {
+    for (const n of this.outlineFlat) {
+      if ((n.page ?? 0) > page) return (n.page as number) - 1;
+    }
+    return this.pageCount;
+  }
+
+  // -------------------------------------------------------------------------
+  // Reading time
+  // -------------------------------------------------------------------------
+
+  /** Seconds per page from this reader's history; a sensible default until we know. */
+  get secondsPerPage(): number {
+    const seconds = this.readingStats.seconds + this.pendingSeconds;
+    const pages = this.readingStats.pages + this.pendingPages;
+    if (pages < 5) return 75;
+    return Math.max(15, Math.min(600, seconds / pages));
+  }
+
+  /** Call whenever the visible page changes. Counts time spent on the previous page. */
+  trackPageTurn(page: number) {
+    const now = Date.now();
+    if (this.lastTrackedPage && page !== this.lastTrackedPage) {
+      const elapsed = (now - this.lastPageTurnAt) / 1000;
+      // Ignore skimming (< 3 s) and idle time (> 10 min)
+      if (elapsed >= 3 && elapsed <= 600) {
+        this.pendingSeconds += Math.round(elapsed);
+        this.pendingPages += 1;
+      }
+    }
+    this.lastTrackedPage = page;
+    this.lastPageTurnAt = now;
+    if (this.pendingPages >= 10) this.flushReadingTime();
+  }
+
+  async loadReadingStats(bookId: number) {
+    this.lastTrackedPage = 0;
+    try {
+      this.readingStats = await api.readingStats(bookId);
+    } catch {
+      this.readingStats = { seconds: 0, pages: 0 };
+    }
+  }
+
+  flushReadingTime() {
+    const book = this.activeBook;
+    if (!book || this.pendingSeconds <= 0) return;
+    const seconds = this.pendingSeconds;
+    const pages = this.pendingPages;
+    this.pendingSeconds = 0;
+    this.pendingPages = 0;
+    this.readingStats = { seconds: this.readingStats.seconds + seconds, pages: this.readingStats.pages + pages };
+    api.logReading(book.id, seconds, pages).catch((e) => console.warn("Could not log reading time:", e));
+  }
+
+  async refreshDueCount() {
+    try {
+      this.dueCount = await api.countDueCards(this.activeBook?.id ?? null);
+    } catch {
+      this.dueCount = 0;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Search
+  // -------------------------------------------------------------------------
+
+  openSearch() {
+    this.searchOpen = true;
+    this.searchFocusToken = Date.now();
+  }
+
+  closeSearch() {
+    this.searchOpen = false;
+    this.searchMatches = [];
+    this.searchIndex = -1;
+  }
+
+  gotoMatch(index: number) {
+    const n = this.searchMatches.length;
+    if (n === 0) return;
+    const i = ((index % n) + n) % n;
+    const first = this.searchIndex === -1;
+    this.searchIndex = i;
+    this.jumpToPage(this.searchMatches[i].page, undefined, first);
   }
 
   async saveCurrentProgress(page: number, zoom?: number) {
@@ -404,6 +787,11 @@ class AppState {
 
   toggleMemoryDrawer() {
     this.memoryDrawerOpen = !this.memoryDrawerOpen;
+  }
+
+  openMemory(tab: MemoryTab) {
+    this.activeMemoryTab = tab;
+    this.memoryDrawerOpen = true;
   }
 
   async toggleFullscreen() {

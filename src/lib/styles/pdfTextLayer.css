@@ -196,3 +196,91 @@
 [data-theme="invert"] .textLayer ::-moz-selection {
   background: rgba(129, 140, 248, 0.45);
 }
+
+/* Line-break <br>s would otherwise paint solid selection blocks at line ends */
+.textLayer br::selection {
+  background: transparent;
+}
+
+/* -------------------------------------------------------------------------
+   SPOTLIGHT (jump-to-passage pulse, drawn in the annotation layer)
+   ------------------------------------------------------------------------- */
+.pdf-spotlight {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 3px;
+  background: rgba(250, 204, 21, 0.45);
+  box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.9);
+  animation: spotlightPulse 2.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  mix-blend-mode: multiply;
+}
+
+[data-theme="dark"] .pdf-spotlight,
+[data-theme="invert"] .pdf-spotlight,
+[data-theme="eyecare"] .pdf-spotlight {
+  mix-blend-mode: screen;
+}
+
+@keyframes spotlightPulse {
+  0% {
+    opacity: 0;
+    box-shadow: 0 0 0 10px rgba(234, 179, 8, 0);
+  }
+  12% {
+    opacity: 1;
+    box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.9);
+  }
+  30% {
+    box-shadow: 0 0 0 6px rgba(234, 179, 8, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.9);
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* -------------------------------------------------------------------------
+   SEARCH HITS & LINKS
+   ------------------------------------------------------------------------- */
+.pdf-search-hit {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 2px;
+  background: rgba(250, 204, 21, 0.35);
+  mix-blend-mode: multiply;
+}
+
+.pdf-search-hit.current {
+  background: rgba(249, 115, 22, 0.55);
+  box-shadow: 0 0 0 2px rgba(234, 88, 12, 0.9);
+}
+
+[data-theme="dark"] .pdf-search-hit,
+[data-theme="invert"] .pdf-search-hit,
+[data-theme="eyecare"] .pdf-search-hit {
+  mix-blend-mode: screen;
+}
+
+.link-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.pdf-link {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.pdf-link:hover {
+  background: rgba(99, 102, 241, 0.12);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.35);
+}

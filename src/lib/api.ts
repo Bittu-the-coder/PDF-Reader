@@ -78,6 +78,31 @@ export interface Highlight {
   created_at: string;
 }
 
+export interface Bookmark {
+  id: number;
+  book_id: number;
+  page: number;
+  label: string | null;
+  created_at: string;
+}
+
+export interface ReviewCard {
+  word_id: number;
+  book_id: number;
+  word: string;
+  meaning: string;
+  meaning_hindi: string | null;
+  example_sentence: string | null;
+  page: number | null;
+  reps: number;
+  due_at: string | null;
+}
+
+export interface ReadingStats {
+  seconds: number;
+  pages: number;
+}
+
 export interface WordLookupResult {
   word: string;
   part_of_speech?: string | null;
@@ -137,11 +162,15 @@ export const api = {
   moveBook: (bookId: number, shelfId: number | null) =>
     invoke<void>("move_book", { bookId, shelfId }),
 
-  getBookCover: (bookId: number) =>
-    invoke<number[] | null>("get_book_cover", { bookId }),
+  /** Raw PNG bytes of the stored cover, or null when the book has none. */
+  getBookCover: async (bookId: number): Promise<Uint8Array | null> => {
+    const buf = await invoke<ArrayBuffer>("get_book_cover", { bookId });
+    const bytes = new Uint8Array(buf);
+    return bytes.length > 0 ? bytes : null;
+  },
 
-  readPdfBytes: (path: string) =>
-    invoke<number[]>("read_pdf_bytes", { path }),
+  readPdfBytes: async (path: string): Promise<Uint8Array> =>
+    new Uint8Array(await invoke<ArrayBuffer>("read_pdf_bytes", { path })),
 
   saveImportedPdf: (name: string, bytes: number[]) =>
     invoke<string>("save_imported_pdf", { name, bytes }),
@@ -245,6 +274,23 @@ export const api = {
 
   updateHighlightColor: (id: number, color: string) =>
     invoke<void>("update_highlight_color", { id, color }),
+
+  // Bookmarks
+  listBookmarks: (bookId: number) => invoke<Bookmark[]>("list_bookmarks", { bookId }),
+  addBookmark: (bookId: number, page: number, label?: string | null) =>
+    invoke<void>("add_bookmark", { bookId, page, label: label ?? null }),
+  deleteBookmark: (bookId: number, page: number) => invoke<void>("delete_bookmark", { bookId, page }),
+
+  // Vocabulary review (1 = again, 2 = hard, 3 = good, 4 = easy)
+  listDueCards: (bookId?: number | null, limit?: number) =>
+    invoke<ReviewCard[]>("list_due_cards", { bookId: bookId ?? null, limit: limit ?? null }),
+  countDueCards: (bookId?: number | null) => invoke<number>("count_due_cards", { bookId: bookId ?? null }),
+  reviewCard: (wordId: number, grade: 1 | 2 | 3 | 4) => invoke<void>("review_card", { wordId, grade }),
+
+  // Reading time
+  logReading: (bookId: number, seconds: number, pages: number) =>
+    invoke<void>("log_reading", { bookId, seconds, pages }),
+  readingStats: (bookId: number) => invoke<ReadingStats>("reading_stats", { bookId }),
 
   // Settings & Secrets
   setApiKey: (key: string, provider?: string) =>

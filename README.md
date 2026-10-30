@@ -1,7 +1,7 @@
 # Shelf — Minimalist AI-Powered PDF Reader 📚⚡
 
 <p align="center">
-  <img src="static/logo.png" alt="Shelf Logo" width="108" height="108" style="border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);" />
+  <img src="static/logo.png" alt="Shelf Logo" width="128" height="128" />
 </p>
 
 <p align="center">
@@ -45,6 +45,11 @@ Traditional PDF readers are either bloated with enterprise clutter or completely
 - 🖍️ **Seamless Line-Merged Annotations**: Intelligent line-clustering algorithm (`mergeLineRects`) eliminates word wireframe seams and double-track underlines, creating smooth marker fills and single crisp baseline strokes.
 - 🌈 **6-Color Vibrant Palettes**: Color-code highlights and underlines with Amber Yellow, Emerald Green, Sky Blue, Amethyst Purple, Rose Pink, and Sunset Orange.
 - 🗂️ **Book Memory & Spotlight Pulse**: All your annotations, saved words, and custom notes are stored locally in SQLite. Clicking any note in the drawer jumps directly to the page and spotlights the passage with an animated pulse.
+- 🔎 **Find in Book**: `Ctrl+F` searches every page, highlights matches on the page and lists them with context.
+- 🔗 **Working Links & Contents**: Clickable links and a full nested table of contents, with a one-click "Back" to where you were.
+- 🔖 **Bookmarks & Reading Time**: Bookmark pages, see how long is left in the chapter (learned from your own reading speed), and pick up where you left off.
+- 🧠 **Word Review**: Saved words come back as flashcards with spaced repetition, right before you'd forget them.
+- 📤 **Export**: Save all highlights, notes and vocabulary of a book as a Markdown study sheet.
 - 📚 **Interactive 3D Bookshelf**: Manage your reading list on an aesthetic wooden bookshelf with cover previews, reading progress bookmarks, and quick collection tabs.
 - 🌐 **Model Agnostic**: Bring your own keys — works with Google Gemini (`gemini-2.5-flash`, `gemini-3.5-flash-lite`, custom models) and OpenRouter (`deepseek-r1`, `mistral`, free-tier models).
 - ⚡ **Lightweight & Private**: Sub-10MB native Linux binary with offline-first local SQLite storage for all books, positions, notes, and vocabulary.
@@ -55,19 +60,22 @@ Traditional PDF readers are either bloated with enterprise clutter or completely
 
 Visit the [Releases Page](https://github.com/Bittu-the-coder/PDF-Reader/releases/latest) or choose your format below:
 
+### Windows 10 / 11
+Download `shelf_0.3.0_x64-setup.exe` (or `shelf_0.3.0_x64_en-US.msi`) from the releases page and run it. No admin rights are needed for the `.exe` installer. WebView2 is installed automatically if it's missing.
+
 ### Debian / Ubuntu / Linux Mint / Pop!_OS
 ```bash
-sudo dpkg -i shelf_0.2.0_amd64.deb
+sudo dpkg -i shelf_0.3.0_amd64.deb
 ```
 
 ### Fedora / RHEL / openSUSE
 ```bash
-sudo rpm -i shelf-0.2.0-1.x86_64.rpm
+sudo rpm -i shelf-0.3.0-1.x86_64.rpm
 ```
 
 ### Standalone Linux Binary
 ```bash
-tar -xzf shelf-v0.2.0-linux-x86_64.tar.gz
+tar -xzf shelf-v0.3.0-linux-x86_64.tar.gz
 ./shelf
 ```
 
@@ -97,14 +105,20 @@ tar -xzf shelf-v0.2.0-linux-x86_64.tar.gz
 
 | Shortcut | Action |
 | :--- | :--- |
-| `Ctrl` + `O` | Open new PDF document |
-| `Ctrl` + `F` / `F` | Toggle Fullscreen mode |
-| `Esc` | Exit Fullscreen / Close active dialogs |
-| `Ctrl` + `+` / `Ctrl` + `=` | Zoom In |
-| `Ctrl` + `-` | Zoom Out |
-| `Ctrl` + `0` | Reset Zoom to 100% |
-| `←` / `→` | Previous / Next Page |
-| `Ctrl` + `B` | Toggle Book Memory Drawer |
+| `Ctrl` + `O` | Open a PDF |
+| `F` / `F11` | Toggle full screen |
+| `Esc` | Close the top-most popup, panel or full screen |
+| `Ctrl` + `+` / `Ctrl` + `-` / `Ctrl` + scroll | Zoom in / out |
+| `Ctrl` + `0` | Reset zoom to 100% |
+| `←` / `→`, `Space` / `Shift` + `Space` | Previous / next page |
+| `Home` / `End` | First / last page |
+| `Ctrl` + `F` | Find in book |
+| `Ctrl` + `D` | Bookmark this page |
+| `Alt` + `←` | Back to where you jumped from (links, search, contents) |
+| `?` | Show all shortcuts |
+| `Ctrl` + `B` | Dock / undock the pages sidebar |
+| `Ctrl` + `Shift` + `B` | Keep toolbar visible / auto-hide |
+| Double-click a word | Look up its meaning in place |
 
 ---
 
@@ -113,9 +127,10 @@ tar -xzf shelf-v0.2.0-linux-x86_64.tar.gz
 ### Prerequisites
 - [Rust](https://www.rust-lang.org/tools/install) (1.78+)
 - [Node.js](https://nodejs.org/) (v20+ or v24)
-- System libraries (Ubuntu/Debian):
+- **Windows:** [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) ("Desktop development with C++") and WebView2 (preinstalled on Windows 10/11).
+- **Linux (Ubuntu/Debian):**
   ```bash
-  sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+  sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev pkg-config
   ```
 
 ### Development
@@ -135,7 +150,10 @@ npm run tauri dev
 ```bash
 npm run tauri build
 ```
-Binaries and distribution packages (`.deb`, `.rpm`) are generated in `src-tauri/target/release/bundle/`.
+Installers for the platform you build on are generated in `src-tauri/target/release/bundle/` (`.msi` / `.exe` on Windows, `.deb` / `.rpm` / `.AppImage` on Linux).
+
+### Releasing for every platform
+Windows installers have to be built on Windows. The `Release` GitHub Actions workflow does this for you: push a tag such as `v0.3.0` (or run the workflow manually from the Actions tab) and it builds Windows, Linux and macOS installers and attaches them to a draft release.
 
 ---
 

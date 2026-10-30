@@ -9,8 +9,11 @@
   import LookupCard from "../lib/components/LookupCard.svelte";
   import MemoryDrawer from "../lib/components/MemoryDrawer.svelte";
   import SettingsModal from "../lib/components/SettingsModal.svelte";
+  import SearchBar from "../lib/components/SearchBar.svelte";
+  import ReviewModal from "../lib/components/ReviewModal.svelte";
+  import ShortcutsModal from "../lib/components/ShortcutsModal.svelte";
 
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { api } from "../lib/api";
 
   let pdfViewer = $state<PDFViewer | null>(null);
@@ -18,28 +21,29 @@
   let loadError = $state<string | null>(null);
 
   onMount(() => {
-    let wheelAccumulator = 0;
-    let lastWheelTime = 0;
-
     const handleGlobalWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) {
-        e.preventDefault();
-        e.stopPropagation();
-        if (appState.currentView === "reader") {
-          const now = Date.now();
-          wheelAccumulator += e.deltaY;
-          if (now - lastWheelTime > 40 || Math.abs(wheelAccumulator) >= 25) {
-            if (wheelAccumulator < 0) {
-              appState.zoomIn();
-            } else if (wheelAccumulator > 0) {
-              appState.zoomOut();
-            }
-            wheelAccumulator = 0;
-            lastWheelTime = now;
-          }
-        }
-      }
+      if (!e.ctrlKey) return;
+      // Never let the webview zoom the whole UI; zoom the PDF instead
+      e.preventDefault();
+      e.stopPropagation();
+      if (appState.currentView !== "reader") return;
+      const delta = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      appState.wheelZoom(delta);
     };
+
+    // Linux: the native side forwards touchpad pinch gestures here
+    let unlistenPinch: (() => void) | null = null;
+    import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<[number, number]>("touchpad-pinch", ({ payload: [phase, scale] }) => {
+          if (appState.currentView !== "reader") return;
+          if (phase === 0) appState.beginPinch();
+          else if (phase === 1) appState.updatePinch(scale);
+          else appState.endPinch();
+        })
+      )
+      .then((u) => (unlistenPinch = u))
+      .catch(() => {});
 
     const handleKeyShortcuts = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -63,17 +67,66 @@
         return;
       }
 
+      // Ctrl+F works even while typing elsewhere
+      if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "F") && appState.currentView === "reader") {
+        e.preventDefault();
+        appState.openSearch();
+        return;
+      }
+
       if (e.key === "Escape") {
-        if (appState.settingsModalOpen) {
+        // Close the top-most layer first
+        if (appState.shortcutsOpen) {
+          appState.shortcutsOpen = false;
+        } else if (appState.reviewOpen) {
+          appState.reviewOpen = false;
+        } else if (appState.settingsModalOpen) {
           appState.settingsModalOpen = false;
-          return;
-        }
-        if (appState.lookupCardVisible) {
+        } else if (appState.activeHighlight) {
+          appState.activeHighlight = null;
+          appState.activeHighlightRect = null;
+        } else if (appState.lookupCardVisible) {
           appState.lookupCardVisible = false;
-          return;
+          window.getSelection()?.removeAllRanges();
+        } else if (appState.searchOpen) {
+          appState.closeSearch();
+        } else if (appState.memoryDrawerOpen) {
+          appState.memoryDrawerOpen = false;
+        } else if (appState.isCompact && appState.sidebarVisible) {
+          appState.sidebarVisible = false;
+        } else if (appState.isFullscreen) {
+          appState.exitFullscreen();
+        } else {
+          window.getSelection()?.removeAllRanges();
         }
         e.preventDefault();
-        appState.exitFullscreen();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === "o" || e.key === "O")) {
+        e.preventDefault();
+        openPdfDialog();
+        return;
+      }
+
+      if (appState.reviewOpen || appState.settingsModalOpen) return;
+
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        appState.shortcutsOpen = !appState.shortcutsOpen;
+        return;
+      }
+
+      if (appState.currentView !== "reader") return;
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
+        e.preventDefault();
+        appState.toggleBookmark();
+        return;
+      }
+      if (e.altKey && e.key === "ArrowLeft") {
+        e.preventDefault();
+        appState.goBack();
         return;
       }
 
@@ -97,6 +150,22 @@
     };
 
     const preventGesture = (e: Event) => e.preventDefault();
+
+    const handleResize = () => {
+      appState.windowWidth = window.innerWidth;
+      appState.windowHeight = window.innerHeight;
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+
+    // Save reading time when the window is hidden or closed
+    const flush = () => appState.flushReadingTime();
+    const onVisibility = () => document.visibilityState === "hidden" && flush();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("beforeunload", flush);
+    const flushTimer = setInterval(flush, 60_000);
+
+    appState.checkApiKey();
 
     // Check initial launch file argument from CLI or system "Open With"
     api.getLaunchFile().then((filePath) => {
@@ -126,6 +195,11 @@
 
     return () => {
       unlistenEvent?.();
+      unlistenPinch?.();
+      window.removeEventListener("resize", handleResize);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("beforeunload", flush);
+      clearInterval(flushTimer);
       window.removeEventListener("wheel", handleGlobalWheel);
       window.removeEventListener("keydown", handleKeyShortcuts);
       window.removeEventListener("mousemove", handleGlobalMouseMove);
@@ -135,47 +209,83 @@
     };
   });
 
-  $effect(() => {
-    // When active book changes in reader, load the document
-    if (appState.currentView === "reader" && appState.activeBook) {
-      const book = appState.activeBook;
-      isLoadingDoc = true;
-      loadError = null;
-      pdfViewer = null;
-
-      const viewer = new PDFViewer();
-
-      const loadFromUint8 = async (uint8: Uint8Array) => {
-        try {
-          const count = await viewer.load(uint8);
-          appState.pageCount = count;
-          pdfViewer = viewer;
-          isLoadingDoc = false;
-        } catch (err: any) {
-          console.error("Failed to parse PDF document:", err);
-          loadError = `Failed to parse document: ${err?.message || err}`;
-          isLoadingDoc = false;
-        }
-      };
-
-      // Check if master bytes are cached
-      if (appState.docBufferCache.has(book.id) && appState.docBufferCache.get(book.id)!.length > 0) {
-        const cached = appState.docBufferCache.get(book.id)!;
-        loadFromUint8(cached);
-      } else {
-        api.readPdfBytes(book.file_path)
-          .then((bytes) => {
-            const uint8 = new Uint8Array(bytes);
-            appState.docBufferCache.set(book.id, uint8);
-            return loadFromUint8(uint8);
-          })
-          .catch((err: any) => {
-            console.error("Failed to read PDF bytes from disk:", err);
-            loadError = `Could not open file: ${err?.message || err}. Path: ${book.file_path}`;
-            isLoadingDoc = false;
-          });
+  async function openPdfDialog() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "PDF Documents", extensions: ["pdf"] }],
+      });
+      if (selected && typeof selected === "string") {
+        await appState.openPdfFilePath(selected);
       }
+    } catch (err) {
+      console.warn("File dialog unavailable:", err);
     }
+  }
+
+  // Count reading time page by page
+  $effect(() => {
+    const page = appState.currentPage;
+    if (appState.currentView !== "reader" || !appState.activeBook || !pdfViewer) return;
+    untrack(() => appState.trackPageTurn(page));
+  });
+
+  // Load the document whenever the active book changes
+  let loadToken = 0;
+  let loadedBookId: number | null = null;
+  $effect(() => {
+    const book = appState.activeBook;
+    if (appState.currentView !== "reader" || !book) {
+      untrack(() => {
+        pdfViewer?.destroy();
+        pdfViewer = null;
+        loadedBookId = null;
+      });
+      return;
+    }
+    if (book.id === loadedBookId) return;
+
+    const token = ++loadToken;
+    untrack(() => {
+      pdfViewer?.destroy();
+      pdfViewer = null;
+    });
+    loadedBookId = book.id;
+    isLoadingDoc = true;
+    loadError = null;
+
+    (async () => {
+      const viewer = new PDFViewer();
+      try {
+        let bytes = appState.docBufferCache.get(book.id);
+        if (!bytes || bytes.length === 0) {
+          bytes = await api.readPdfBytes(book.file_path);
+          appState.docBufferCache.set(book.id, bytes);
+        }
+        const count = await viewer.load(bytes);
+        if (token !== loadToken) {
+          viewer.destroy();
+          return;
+        }
+        appState.pageCount = count;
+        pdfViewer = viewer;
+        viewer.getOutlineTree().then((tree) => {
+          if (token === loadToken) appState.outline = tree;
+        });
+      } catch (err: any) {
+        viewer.destroy();
+        if (token !== loadToken) return;
+        console.error("Failed to open document:", err);
+        const msg = err?.message || String(err);
+        loadError = /no such file|not found|os error 2|cannot find/i.test(msg)
+          ? `The file could not be found. It may have been moved or deleted.\n\n${book.file_path}`
+          : `Could not open this document: ${msg}`;
+        loadedBookId = null;
+      } finally {
+        if (token === loadToken) isLoadingDoc = false;
+      }
+    })();
   });
 </script>
 
@@ -212,6 +322,16 @@
     </header>
 
     <div class="reader-workspace {appState.sidebarPinned ? 'has-pinned-sidebar' : ''}">
+      {#if appState.isCompact && (appState.sidebarVisible || appState.memoryDrawerOpen)}
+        <button
+          class="compact-scrim"
+          aria-label="Close panel"
+          onclick={() => {
+            appState.sidebarVisible = false;
+            appState.memoryDrawerOpen = false;
+          }}
+        ></button>
+      {/if}
       <Sidebar {pdfViewer} />
       
       <main class="reader-main">
@@ -227,13 +347,14 @@
               <p>{loadError}</p>
               <div class="error-actions">
                 <button class="btn-primary" onclick={() => appState.goToShelf()}>
-                  Return to 3D Library
+                  Back to Library
                 </button>
               </div>
             </div>
           </div>
         {:else}
           <Reader bind:pdfViewer />
+          <SearchBar {pdfViewer} />
         {/if}
       </main>
 
@@ -245,6 +366,25 @@
 {/if}
 
 <SettingsModal />
+<ReviewModal />
+<ShortcutsModal />
+
+{#if appState.importStatus}
+  <div class="import-overlay" role="status" aria-live="polite">
+    <div class="import-card">
+      <div class="spinner"></div>
+      <span>{appState.importStatus}</span>
+    </div>
+  </div>
+{/if}
+
+{#if appState.toast}
+  {#key appState.toast.token}
+    <div class="toast {appState.toast.kind}" role="status" aria-live="polite">
+      {appState.toast.message}
+    </div>
+  {/key}
+{/if}
 
 <style>
   .reader-shell {
@@ -368,11 +508,89 @@
   }
 
   .error-card p {
+    white-space: pre-wrap;
     margin: 0;
     font-size: 13px;
     line-height: 1.5;
     color: var(--text-secondary);
     word-break: break-word;
+  }
+
+  .compact-scrim {
+    position: absolute;
+    inset: 0;
+    z-index: 95;
+    background: rgba(0, 0, 0, 0.38);
+    border-radius: 0;
+    animation: fadeIn 0.18s ease;
+  }
+
+  .import-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(3px);
+    animation: fadeIn 0.18s ease;
+  }
+
+  .import-card {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 22px;
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    color: var(--text-primary);
+    font-size: 14px;
+  }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    z-index: 2100;
+    max-width: min(520px, calc(100vw - 32px));
+    padding: 10px 16px;
+    border-radius: var(--radius-full);
+    background: var(--text-primary);
+    color: var(--bg-primary);
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: var(--shadow-lg);
+    animation: toastIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    text-align: center;
+  }
+
+  .toast.error {
+    background: var(--danger);
+    color: #fff;
+  }
+
+  @keyframes toastIn {
+    from {
+      opacity: 0;
+      transform: translate(-50%, 10px);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 
   .error-actions {

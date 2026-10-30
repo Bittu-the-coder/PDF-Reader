@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a1b5e"/>
+      <stop offset="0.55" stop-color="#3b1a78"/>
+      <stop offset="1" stop-color="#5b21b6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.8" r="0.6">
+      <stop offset="0" stop-color="#f472b6" stop-opacity="0.38"/>
+      <stop offset="0.6" stop-color="#c026d3" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#c026d3" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="light" cx="0.18" cy="0.1" r="0.7">
+      <stop offset="0" stop-color="#818cf8" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#818cf8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="0.4" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.1"/>
+    </linearGradient>
+    <linearGradient id="cover" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f59e0b"/>
+      <stop offset="0.5" stop-color="#ea580c"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <linearGradient id="pageL" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fffdf7"/>
+      <stop offset="0.85" stop-color="#fbf3df"/>
+      <stop offset="1" stop-color="#ecdcb8"/>
+    </linearGradient>
+    <linearGradient id="pageR" x1="1" y1="0" x2="0" y2="0">
+      <stop offset="0" stop-color="#fffdf7"/>
+      <stop offset="0.85" stop-color="#fbf3df"/>
+      <stop offset="1" stop-color="#e6d3aa"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#e879f9"/>
+    </linearGradient>
+    <radialGradient id="sparkGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fde68a" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#fde68a" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#12052e" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <!-- Tile -->
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#bg)"/>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#light)"/>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#glow)"/>
+  <rect x="66" y="66" width="892" height="892" rx="206" fill="none" stroke="url(#rim)" stroke-width="4"/>
+
+  <g filter="url(#shadow)">
+    <!-- Cover peeking under the pages -->
+    <path d="M512 372 C 430 318 300 306 196 334 L 196 742 C 300 716 430 724 512 780 C 594 724 724 716 828 742 L 828 334 C 724 306 594 318 512 372 Z" fill="url(#cover)"/>
+    <!-- Page stack edges -->
+    <path d="M512 354 C 430 302 302 290 210 316 L 210 722 C 302 698 430 706 512 756 C 594 706 722 698 814 722 L 814 316 C 722 290 594 302 512 354 Z" fill="#f3e2bf"/>
+    <!-- Left page -->
+    <path d="M512 338 C 432 286 312 274 226 298 L 226 704 C 312 682 432 690 512 740 Z" fill="url(#pageL)"/>
+    <!-- Right page -->
+    <path d="M512 338 C 592 286 712 274 798 298 L 798 704 C 712 682 592 690 512 740 Z" fill="url(#pageR)"/>
+    <!-- Spine -->
+    <path d="M512 338 L 512 740" stroke="#d6bf8e" stroke-width="4" stroke-linecap="round"/>
+  </g>
+
+  <!-- Text lines, left page -->
+  <g stroke="#cdb98f" stroke-width="17" stroke-linecap="round" fill="none">
+    <path d="M280 396 Q 380 386 462 418"/>
+    <path d="M280 466 Q 380 456 462 488"/>
+    <path d="M280 536 Q 380 526 462 558"/>
+    <path d="M280 606 Q 350 599 412 618"/>
+  </g>
+
+  <!-- Right page, with one line marked by the highlighter -->
+  <path d="M548 470 Q 644 432 760 443" stroke="url(#mark)" stroke-width="40" stroke-linecap="butt" stroke-linejoin="round" fill="none" opacity="0.75"/>
+  <g stroke="#cdb98f" stroke-width="17" stroke-linecap="round" fill="none">
+    <path d="M562 396 Q 644 364 744 374"/>
+    <path d="M562 466 Q 644 434 744 444" stroke="#4c1d95" opacity="0.55"/>
+    <path d="M562 536 Q 644 504 744 514"/>
+    <path d="M562 606 Q 620 582 690 584"/>
+  </g>
+
+  <!-- Sparkle: "meaning, in place" -->
+  <circle cx="700" cy="196" r="88" fill="url(#sparkGlow)"/>
+  <path d="M700 122 C 707 170 724 187 772 194 C 724 201 707 218 700 266 C 693 218 676 201 628 194 C 676 187 693 170 700 122 Z" fill="#fff7d6"/>
+  <path d="M808 132 C 811 150 818 157 836 160 C 818 163 811 170 808 188 C 805 170 798 163 780 160 C 798 157 805 150 808 132 Z" fill="#fde68a"/>
+</svg>

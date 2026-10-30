@@ -1,49 +1,68 @@
 <script lang="ts">
   import { appState, type Theme, type ReadingMode } from "../stores/appState.svelte";
+  import Icon from "./Icon.svelte";
 
-  let pageInput = $state(appState.currentPage);
-  let themeMenuOpen = $state(false);
+  let pageInput = $state(String(appState.currentPage));
+  let viewMenuOpen = $state(false);
+  let viewMenuEl = $state<HTMLDivElement>();
 
   $effect(() => {
-    pageInput = appState.currentPage;
+    pageInput = String(appState.currentPage);
   });
 
   function handlePageCommit() {
-    let p = Math.max(1, Math.min(appState.pageCount, Number(pageInput) || 1));
-    pageInput = p;
-    appState.jumpToPage(p);
+    const p = Math.max(1, Math.min(appState.pageCount, Math.round(Number(pageInput)) || appState.currentPage));
+    pageInput = String(p);
+    if (p !== appState.currentPage) appState.jumpToPage(p);
   }
 
-  const themes: { id: Theme; name: string; icon: string; desc: string }[] = [
-    { id: "dark", name: "Dark Reading", icon: "🌙", desc: "Charcoal inverted PDF" },
-    { id: "light", name: "Light Paper", icon: "☀️", desc: "Original daylight white" },
-    { id: "eyecare", name: "Eye Protection", icon: "🕯️", desc: "Warm amber blue-light shield" },
-    { id: "sepia", name: "Sepia Parchment", icon: "📜", desc: "Vintage warm paper" },
-    { id: "invert", name: "OLED Invert", icon: "⬛", desc: "Pure black high contrast" },
+  const themes: { id: Theme; name: string; icon: string; swatch: string; ink: string }[] = [
+    { id: "light", name: "Paper", icon: "sun", swatch: "#ffffff", ink: "#18181b" },
+    { id: "sepia", name: "Sepia", icon: "scroll", swatch: "#f4ecd8", ink: "#5b4636" },
+    { id: "eyecare", name: "Warm", icon: "flame", swatch: "#f6e3b4", ink: "#3d2b14" },
+    { id: "dark", name: "Night", icon: "moon", swatch: "#1d1d21", ink: "#d4d4d8" },
+    { id: "invert", name: "OLED", icon: "contrast", swatch: "#000000", ink: "#ffffff" },
   ];
 
   const readingModes: { id: ReadingMode; label: string; icon: string }[] = [
-    { id: "single", label: "Single", icon: "📄" },
-    { id: "dual", label: "Two Pages", icon: "📖" },
-    { id: "scroll", label: "Scroll", icon: "📜" },
+    { id: "single", label: "Single page", icon: "page-single" },
+    { id: "dual", label: "Two pages", icon: "page-dual" },
+    { id: "scroll", label: "Continuous", icon: "page-scroll" },
   ];
+
+  let progress = $derived(appState.pageCount > 1 ? (appState.currentPage - 1) / (appState.pageCount - 1) : 1);
+  let memoryCount = $derived(appState.words.length + appState.notes.length + appState.highlights.length);
+
+  // Close the view menu on outside click
+  $effect(() => {
+    if (!viewMenuOpen) return;
+    const onDown = (e: PointerEvent) => {
+      if (viewMenuEl && !viewMenuEl.contains(e.target as Node)) viewMenuOpen = false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        viewMenuOpen = false;
+      }
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  });
 </script>
 
-<header
-  class="top-bar"
-  role="toolbar"
-  aria-label="Reader Top Bar"
->
+<div class="top-bar" role="toolbar" aria-label="Reader toolbar">
   <div class="top-left">
     <button
-      class="icon-btn"
+      class="icon-btn {appState.sidebarVisible ? 'active' : ''}"
       onclick={() => (appState.sidebarVisible = !appState.sidebarVisible)}
-      title="Toggle Thumbnails / Outline (Ctrl+B)"
+      title="Pages & chapters"
+      aria-label="Toggle pages and chapters panel"
     >
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect width="18" height="18" x="3" y="3" rx="2"/>
-        <path d="M9 3v18"/>
-      </svg>
+      <Icon name="sidebar" size={18} />
     </button>
 
     <div class="book-title" title={appState.activeBook?.title}>
@@ -52,491 +71,620 @@
   </div>
 
   <div class="top-center">
-    <!-- Page Navigation -->
     <div class="page-nav">
       <button
-        class="icon-btn-sm"
+        class="icon-btn sm"
         disabled={appState.currentPage <= 1}
-        onclick={() => appState.jumpToPage(appState.currentPage - (appState.readingMode === 'dual' ? 2 : 1))}
-        title="Previous Page (Left Arrow / Page Up)"
+        onclick={() => appState.jumpToPage(appState.currentPage - appState.pageStep)}
+        title="Previous page (←)"
+        aria-label="Previous page"
       >
-        ‹
+        <Icon name="chevron-left" size={17} />
       </button>
 
-      <div class="page-input-wrapper">
+      <label class="page-field">
+        <span class="visually-hidden">Current page</span>
         <input
-          type="number"
+          type="text"
+          inputmode="numeric"
           bind:value={pageInput}
-          onchange={handlePageCommit}
-          onkeydown={(e) => e.key === "Enter" && handlePageCommit()}
-          min="1"
-          max={appState.pageCount}
+          onblur={handlePageCommit}
+          onkeydown={(e) => {
+            if (e.key === "Enter") {
+              handlePageCommit();
+              (e.currentTarget as HTMLInputElement).blur();
+            }
+          }}
+          onfocus={(e) => (e.currentTarget as HTMLInputElement).select()}
           class="page-input"
+          style="width: {Math.max(2, String(appState.pageCount).length) + 1.2}ch"
         />
         <span class="page-count">/ {appState.pageCount}</span>
-      </div>
+      </label>
 
       <button
-        class="icon-btn-sm"
+        class="icon-btn sm"
         disabled={appState.currentPage >= appState.pageCount}
-        onclick={() => appState.jumpToPage(appState.currentPage + (appState.readingMode === 'dual' ? 2 : 1))}
-        title="Next Page (Right Arrow / Page Down)"
+        onclick={() => appState.jumpToPage(appState.currentPage + appState.pageStep)}
+        title="Next page (→)"
+        aria-label="Next page"
       >
-        ›
-      </button>
-    </div>
-
-    <!-- Reading Mode Selector (Single / Dual / Vertical Scroll) -->
-    <div class="mode-selector">
-      {#each readingModes as m}
-        <button
-          class="mode-btn {appState.readingMode === m.id ? 'active' : ''}"
-          onclick={() => appState.setReadingMode(m.id)}
-          title="Reading Mode: {m.label}"
-        >
-          <span class="mode-icon">{m.icon}</span>
-          <span class="mode-label">{m.label}</span>
-        </button>
-      {/each}
-    </div>
-
-    <!-- Zoom Controls -->
-    <div class="zoom-controls">
-      <button class="icon-btn-sm" onclick={() => appState.zoomOut()} title="Zoom Out (Ctrl -)">-</button>
-      <span class="zoom-text">{Math.round(appState.zoom * 100)}%</span>
-      <button class="icon-btn-sm" onclick={() => appState.zoomIn()} title="Zoom In (Ctrl +)">+</button>
-      <button
-        class="text-btn-sm {appState.fitMode === 'width' ? 'active' : ''}"
-        onclick={() => appState.setFitMode("width")}
-        title="Fit Width"
-      >
-        Fit Width
-      </button>
-      <button
-        class="text-btn-sm {appState.fitMode === 'page' ? 'active' : ''}"
-        onclick={() => appState.setFitMode("page")}
-        title="Fit Page"
-      >
-        Fit Page
+        <Icon name="chevron-right" size={17} />
       </button>
     </div>
   </div>
 
   <div class="top-right">
-    <!-- Theme & Eye Care Menu Dropdown -->
-    <div class="theme-menu-wrapper">
+    <button
+      class="icon-btn {appState.searchOpen ? 'active' : ''}"
+      onclick={() => (appState.searchOpen ? appState.closeSearch() : appState.openSearch())}
+      title="Find in book (Ctrl+F)"
+      aria-label="Find in book"
+    >
+      <Icon name="search" size={17} />
+    </button>
+
+    <button
+      class="icon-btn {appState.isBookmarked(appState.currentPage) ? 'bookmarked' : ''}"
+      onclick={() => appState.toggleBookmark()}
+      title={appState.isBookmarked(appState.currentPage) ? "Remove bookmark (Ctrl+D)" : "Bookmark this page (Ctrl+D)"}
+      aria-label="Toggle bookmark"
+      aria-pressed={appState.isBookmarked(appState.currentPage)}
+    >
+      <Icon name="bookmark" size={17} />
+    </button>
+
+    <div class="zoom-controls">
+      <button class="icon-btn sm" onclick={() => appState.zoomOut()} title="Zoom out (Ctrl −)" aria-label="Zoom out">
+        <Icon name="minus" size={15} />
+      </button>
+      <button class="zoom-text" onclick={() => appState.setZoom(1)} title="Reset to 100% (Ctrl 0)">
+        {Math.round((appState.pinchZoom ?? appState.zoom) * 100)}%
+      </button>
+      <button class="icon-btn sm" onclick={() => appState.zoomIn()} title="Zoom in (Ctrl +)" aria-label="Zoom in">
+        <Icon name="plus" size={15} />
+      </button>
+    </div>
+
+    <div class="view-menu-wrapper" bind:this={viewMenuEl}>
       <button
-        class="icon-btn {themeMenuOpen ? 'active' : ''}"
-        onclick={() => (themeMenuOpen = !themeMenuOpen)}
-        title="View Mode & PDF Color Theme"
+        class="view-btn {viewMenuOpen ? 'active' : ''}"
+        onclick={() => (viewMenuOpen = !viewMenuOpen)}
+        title="Layout, fit & theme"
+        aria-haspopup="true"
+        aria-expanded={viewMenuOpen}
       >
-        {#if appState.theme === "dark"}
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
-          </svg>
-        {:else if appState.theme === "eyecare"}
-          <span style="font-size: 15px;">🕯️</span>
-        {:else if appState.theme === "sepia"}
-          <span style="font-size: 15px;">📜</span>
-        {:else if appState.theme === "invert"}
-          <span style="font-size: 15px;">⬛</span>
-        {:else}
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="4"/>
-            <path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
-          </svg>
-        {/if}
+        <Icon name="palette" size={16} />
+        <span class="view-label">View</span>
+        <Icon name="chevron-down" size={13} />
       </button>
 
-      {#if themeMenuOpen}
-        <div
-          class="theme-dropdown"
-          role="menu"
-          tabindex="-1"
-          onmouseleave={() => (themeMenuOpen = false)}
-        >
-          <div class="dropdown-header">PDF Theme & Color</div>
-          {#each themes as t}
-            <button
-              class="theme-option {appState.theme === t.id ? 'active' : ''}"
-              onclick={() => { appState.setTheme(t.id); themeMenuOpen = false; }}
-              role="menuitem"
-            >
-              <span class="theme-opt-icon">{t.icon}</span>
-              <div class="theme-opt-info">
-                <span class="theme-opt-name">{t.name}</span>
-                <span class="theme-opt-desc">{t.desc}</span>
-              </div>
+      {#if viewMenuOpen}
+        <div class="view-menu" role="menu">
+          <div class="menu-section">
+            <div class="menu-heading">Layout</div>
+            <div class="segmented">
+              {#each readingModes as m}
+                <button
+                  class="seg-btn {appState.readingMode === m.id ? 'active' : ''}"
+                  onclick={() => appState.setReadingMode(m.id)}
+                  role="menuitemradio"
+                  aria-checked={appState.readingMode === m.id}
+                >
+                  <Icon name={m.icon} size={18} />
+                  <span>{m.label}</span>
+                </button>
+              {/each}
+            </div>
+            {#if appState.readingMode === "dual" && appState.layoutMode !== "dual"}
+              <p class="menu-hint">Window is too narrow for two pages, showing one.</p>
+            {/if}
+          </div>
+
+          <div class="menu-section">
+            <div class="menu-heading">Fit</div>
+            <div class="segmented two">
+              <button
+                class="seg-btn {appState.fitMode === 'width' ? 'active' : ''}"
+                onclick={() => appState.setFitMode("width")}
+                role="menuitemradio"
+                aria-checked={appState.fitMode === "width"}
+              >
+                <Icon name="fit-width" size={18} />
+                <span>Fit width</span>
+              </button>
+              <button
+                class="seg-btn {appState.fitMode === 'page' ? 'active' : ''}"
+                onclick={() => appState.setFitMode("page")}
+                role="menuitemradio"
+                aria-checked={appState.fitMode === "page"}
+              >
+                <Icon name="fit-page" size={18} />
+                <span>Whole page</span>
+              </button>
+            </div>
+            <div class="zoom-row">
+              <button class="icon-btn sm" onclick={() => appState.zoomOut()} aria-label="Zoom out"><Icon name="minus" size={15} /></button>
+              <input
+                type="range"
+                min="0.4"
+                max="3"
+                step="0.05"
+                value={appState.zoom}
+                oninput={(e) => appState.setZoom(Number((e.currentTarget as HTMLInputElement).value))}
+                aria-label="Zoom"
+              />
+              <button class="icon-btn sm" onclick={() => appState.zoomIn()} aria-label="Zoom in"><Icon name="plus" size={15} /></button>
+              <span class="zoom-value">{Math.round((appState.pinchZoom ?? appState.zoom) * 100)}%</span>
+            </div>
+          </div>
+
+          <div class="menu-section">
+            <div class="menu-heading">Page color</div>
+            <div class="theme-swatches">
+              {#each themes as t}
+                <button
+                  class="theme-swatch {appState.theme === t.id ? 'active' : ''}"
+                  onclick={() => appState.setTheme(t.id)}
+                  title={t.name}
+                  role="menuitemradio"
+                  aria-checked={appState.theme === t.id}
+                >
+                  <span class="swatch-chip" style="background: {t.swatch}; color: {t.ink};">Aa</span>
+                  <span class="swatch-name">{t.name}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="menu-section menu-toggles">
+            <button class="menu-row" onclick={() => appState.toggleFullscreen()}>
+              <Icon name={appState.isFullscreen ? "minimize" : "maximize"} size={16} />
+              <span>{appState.isFullscreen ? "Exit full screen" : "Full screen"}</span>
+              <kbd>F</kbd>
             </button>
-          {/each}
+            <button class="menu-row" onclick={() => appState.toggleTopBarPinned()}>
+              <Icon name={appState.topBarPinned ? "pin-off" : "pin"} size={16} />
+              <span>{appState.topBarPinned ? "Auto-hide toolbar" : "Keep toolbar visible"}</span>
+              <kbd>Ctrl ⇧ B</kbd>
+            </button>
+            <button
+              class="menu-row"
+              onclick={() => {
+                viewMenuOpen = false;
+                appState.settingsModalOpen = true;
+              }}
+            >
+              <Icon name="settings" size={16} />
+              <span>Settings & AI provider</span>
+            </button>
+            <button
+              class="menu-row"
+              onclick={() => {
+                viewMenuOpen = false;
+                appState.shortcutsOpen = true;
+              }}
+            >
+              <Icon name="key" size={16} />
+              <span>Keyboard shortcuts</span>
+              <kbd>?</kbd>
+            </button>
+          </div>
         </div>
       {/if}
     </div>
 
-    <!-- Memory Drawer Toggle -->
     <button
-      class="icon-btn {appState.memoryDrawerOpen || appState.memoryDrawerPinned ? 'active' : ''}"
+      class="icon-btn {appState.memoryDrawerOpen ? 'active' : ''}"
       onclick={() => appState.toggleMemoryDrawer()}
-      title="Book Memory (Vocabulary & Notes)"
+      title="Book memory: words, notes & highlights"
+      aria-label="Book memory"
     >
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-        <path d="M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1Z"/>
-      </svg>
-      {#if appState.words.length + appState.notes.length > 0}
-        <span class="badge">{appState.words.length + appState.notes.length}</span>
+      <Icon name="brain" size={18} />
+      {#if memoryCount > 0}
+        <span class="badge">{memoryCount > 99 ? "99+" : memoryCount}</span>
       {/if}
     </button>
 
-    <!-- Fullscreen Toggle Button -->
     <button
-      class="icon-btn {appState.isFullscreen ? 'active' : ''}"
+      class="icon-btn hide-narrow {appState.isFullscreen ? 'active' : ''}"
       onclick={() => appState.toggleFullscreen()}
-      title="Toggle Fullscreen (F11 / F)"
+      title="Full screen (F / F11)"
+      aria-label="Toggle full screen"
     >
-      {#if appState.isFullscreen}
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
-        </svg>
-      {:else}
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-        </svg>
-      {/if}
+      <Icon name={appState.isFullscreen ? "minimize" : "maximize"} size={16} />
     </button>
 
-    <!-- Settings Modal Toggle -->
     <button
-      class="icon-btn {appState.settingsModalOpen ? 'active' : ''}"
+      class="icon-btn hide-narrow"
       onclick={() => (appState.settingsModalOpen = true)}
-      title="Settings & AI Model Provider"
+      title="Settings"
+      aria-label="Settings"
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
-        <circle cx="12" cy="12" r="3"/>
-      </svg>
-    </button>
-
-    <!-- Pin Button for Top Bar (Smart Toggle) -->
-    <button
-      class="icon-btn {appState.topBarPinned ? 'active pinned' : ''}"
-      onclick={() => appState.toggleTopBarPinned()}
-      title={appState.topBarPinned ? "Unpin Top Bar (Auto-hide for immersive reading)" : "Pin Top Bar (Always visible)"}
-    >
-      <svg width="15" height="15" viewBox="0 0 24 24" fill={appState.topBarPinned ? "currentColor" : "none"} stroke="currentColor" stroke-width="2">
-        <path d="M12 17v5"/>
-        <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V5h1a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1h1z"/>
-      </svg>
+      <Icon name="settings" size={17} />
     </button>
   </div>
-</header>
+
+  <div class="progress-track" aria-hidden="true">
+    <div class="progress-fill" style="transform: scaleX({progress});"></div>
+  </div>
+</div>
 
 <style>
   .top-bar {
-    height: 44px;
-    min-height: 44px;
+    height: var(--chrome-height);
+    min-height: var(--chrome-height);
     background: var(--bg-surface);
     border-bottom: 1px solid var(--border-subtle);
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    justify-content: space-between;
-    padding: 0 14px;
-    box-shadow: var(--shadow-sm);
+    gap: 12px;
+    padding: 0 10px;
     position: relative;
     flex-shrink: 0;
     z-index: 80;
   }
 
-  .top-left, .top-right {
+  .top-left,
+  .top-right {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .top-right {
+    justify-content: flex-end;
   }
 
   .book-title {
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 13.5px;
+    font-weight: 600;
     color: var(--text-primary);
-    max-width: 200px;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
+    padding-left: 4px;
   }
 
-  .top-center {
-    display: flex;
-    align-items: center;
-    gap: 16px;
+  .icon-btn.bookmarked {
+    color: var(--danger);
+  }
+
+  .icon-btn.bookmarked :global(svg) {
+    fill: currentColor;
+  }
+
+  .icon-btn.sm {
+    width: 28px;
+    height: 28px;
   }
 
   .page-nav {
     display: flex;
     align-items: center;
-    gap: 4px;
-    background: var(--bg-surface);
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
+    gap: 2px;
+    background: var(--bg-secondary);
     border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 2px;
   }
 
-  .page-input-wrapper {
+  .page-field {
     display: flex;
     align-items: center;
     gap: 4px;
     padding: 0 4px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
   }
 
   .page-input {
-    width: 36px;
-    padding: 2px 4px;
-    font-size: 12px;
+    min-width: 3ch;
+    height: 26px;
+    padding: 0 4px;
     text-align: center;
-    background: transparent;
-    border: none;
-    color: var(--text-primary);
     font-weight: 600;
-    appearance: textfield;
-    -moz-appearance: textfield;
+    font-variant-numeric: tabular-nums;
+    background: var(--bg-surface);
+    border-color: transparent;
   }
 
-  .page-input::-webkit-outer-spin-button,
-  .page-input::-webkit-inner-spin-button {
-    -webkit-appearance: none;
-    margin: 0;
+  .page-input:hover {
+    border-color: var(--border-subtle);
   }
 
   .page-count {
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
-  .mode-selector {
-    display: flex;
-    align-items: center;
-    background: var(--bg-surface);
-    padding: 2px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-subtle);
-    gap: 2px;
-  }
-
-  .mode-btn {
-    padding: 3px 8px;
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    border-radius: var(--radius-xs);
-    gap: 4px;
-    transition: all var(--transition-fast);
-  }
-
-  .mode-btn.active {
-    background: var(--bg-active);
-    color: var(--text-primary);
-  }
-
-  .mode-icon {
-    font-size: 12px;
+    white-space: nowrap;
   }
 
   .zoom-controls {
     display: flex;
     align-items: center;
-    gap: 4px;
-    background: var(--bg-surface);
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-subtle);
+    gap: 0;
+    margin-right: 2px;
   }
 
   .zoom-text {
-    font-size: 11px;
+    min-width: 48px;
+    height: 28px;
+    font-size: 12.5px;
     font-weight: 600;
-    min-width: 40px;
-    text-align: center;
     color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
   }
 
-  .text-btn-sm {
-    padding: 3px 7px;
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--text-secondary);
-    border-radius: var(--radius-xs);
-  }
-
-  .text-btn-sm.active {
-    background: var(--bg-active);
+  .zoom-text:hover {
+    background: var(--bg-hover);
     color: var(--text-primary);
   }
 
-  .icon-btn {
-    width: 32px;
-    height: 32px;
-    color: var(--text-secondary);
-    border-radius: var(--radius-sm);
+  .view-menu-wrapper {
     position: relative;
   }
 
-  .icon-btn:hover {
+  .view-btn {
+    height: 32px;
+    padding: 0 8px 0 10px;
+    gap: 6px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  .view-btn:hover,
+  .view-btn.active {
     background: var(--bg-hover);
     color: var(--text-primary);
   }
 
-  .icon-btn.active {
+  .view-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 320px;
+    max-width: calc(100vw - 20px);
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: 6px;
+    z-index: 200;
+    animation: menuIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes menuIn {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  .menu-section {
+    padding: 8px;
+  }
+
+  .menu-section + .menu-section {
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .menu-heading {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+
+  .menu-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .segmented {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+
+  .segmented.two {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .seg-btn {
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 4px 8px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-surface);
+  }
+
+  .seg-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+  }
+
+  .seg-btn.active {
     color: var(--accent);
+    border-color: var(--accent);
     background: var(--accent-subtle);
   }
 
-  .icon-btn-sm {
-    width: 22px;
-    height: 22px;
-    font-size: 14px;
-    color: var(--text-secondary);
-    border-radius: var(--radius-xs);
+  .zoom-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 10px;
   }
 
-  .icon-btn-sm:hover:not(:disabled) {
-    background: var(--bg-hover);
+  .zoom-row input[type="range"] {
+    flex: 1;
+    padding: 0;
+    border: none;
+    background: transparent;
+    accent-color: var(--accent);
+  }
+
+  .zoom-value {
+    width: 42px;
+    text-align: right;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .theme-swatches {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+  }
+
+  .theme-swatch {
+    flex-direction: column;
+    gap: 5px;
+    padding: 4px 0;
+    color: var(--text-secondary);
+    font-size: 11px;
+  }
+
+  .swatch-chip {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-reading);
+    font-size: 15px;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px rgba(128, 128, 128, 0.35);
+    transition: box-shadow var(--transition-fast), transform var(--transition-fast);
+  }
+
+  .theme-swatch:hover .swatch-chip {
+    transform: scale(1.06);
+  }
+
+  .theme-swatch.active {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  .theme-swatch.active .swatch-chip {
+    box-shadow: 0 0 0 2px var(--bg-surface-elevated), 0 0 0 4px var(--accent);
+  }
+
+  .menu-toggles {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 2px;
+  }
+
+  .menu-row {
+    justify-content: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 8px;
+    font-size: 13px;
     color: var(--text-primary);
   }
 
-  .icon-btn-sm:disabled {
-    opacity: 0.3;
-    cursor: default;
+  .menu-row:hover {
+    background: var(--bg-hover);
+  }
+
+  .menu-row span {
+    flex: 1;
+    text-align: left;
+  }
+
+  kbd {
+    font-family: inherit;
+    font-size: 11px;
+    color: var(--text-muted);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xs);
+    padding: 1px 5px;
   }
 
   .badge {
     position: absolute;
-    top: 2px;
-    right: 2px;
-    min-width: 14px;
-    height: 14px;
-    padding: 0 3px;
-    background: var(--accent);
-    color: #ffffff;
-    font-size: 9px;
-    font-weight: 700;
+    top: -3px;
+    right: -5px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
     border-radius: var(--radius-full);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .theme-menu-wrapper {
-    position: relative;
-  }
-
-  .theme-dropdown {
-    position: absolute;
-    top: 38px;
-    right: 0;
-    width: 210px;
-    background: var(--bg-surface-elevated);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg);
-    padding: 6px;
-    z-index: 200;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .dropdown-header {
-    font-size: 10px;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 9.5px;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-muted);
-    padding: 6px 8px 4px;
+    line-height: 16px;
+    text-align: center;
+    border: 2px solid var(--bg-surface);
+    box-sizing: content-box;
   }
 
-  .theme-option {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 8px;
-    border-radius: var(--radius-sm);
-    text-align: left;
-    width: 100%;
-    transition: background var(--transition-fast);
+  .progress-track {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    pointer-events: none;
   }
 
-  .theme-option:hover {
-    background: var(--bg-hover);
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    transform-origin: left center;
+    transition: transform var(--transition-normal);
+    opacity: 0.8;
   }
 
-  .theme-option.active {
-    background: var(--bg-active);
-    border: 1px solid var(--accent);
-  }
-
-  .theme-opt-icon {
-    font-size: 16px;
-  }
-
-  .theme-opt-info {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .theme-opt-name {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  .theme-opt-desc {
-    font-size: 10px;
-    color: var(--text-muted);
-  }
-
-  @media (max-width: 960px) {
-    .book-title {
-      max-width: 120px;
-    }
-    .top-center {
-      gap: 8px;
-    }
-  }
-
-  @media (max-width: 820px) {
-    .book-title {
-      display: none;
-    }
-    .mode-label {
-      display: none;
-    }
-    .mode-btn {
-      padding: 3px 6px;
-    }
-  }
-
-  @media (max-width: 680px) {
-    .text-btn-sm {
-      display: none;
-    }
-    .top-bar {
-      padding: 0 8px;
-    }
-    .top-center {
-      gap: 4px;
-    }
-    .page-count {
-      display: none;
-    }
-  }
-
-  @media (max-width: 540px) {
+  @media (max-width: 980px) {
     .zoom-controls {
       display: none;
     }
-    .top-bar {
-      padding: 0 4px;
+  }
+
+  @media (max-width: 760px) {
+    .view-label,
+    .hide-narrow {
+      display: none;
     }
-    .mode-btn {
-      padding: 2px 4px;
+    .top-bar {
+      gap: 6px;
+      padding: 0 6px;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .book-title {
+      display: none;
+    }
+    .top-bar {
+      grid-template-columns: auto 1fr auto;
+    }
+    .top-center {
+      justify-self: center;
     }
   }
 </style>

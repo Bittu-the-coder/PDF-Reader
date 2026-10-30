@@ -145,17 +145,22 @@ pub async fn move_book(
     db.move_book(book_id, shelf_id)
 }
 
+/// Returns the cover PNG as a raw binary IPC response (an empty body means no cover).
 #[tauri::command]
 pub async fn get_book_cover(
     db: State<'_, Database>,
     book_id: i64,
-) -> Result<Option<Vec<u8>>, AppError> {
-    db.get_book_cover(book_id)
+) -> Result<tauri::ipc::Response, AppError> {
+    let bytes = db.get_book_cover(book_id)?.unwrap_or_default();
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// Returns the PDF as a raw binary IPC response. Serializing a `Vec<u8>` would send
+/// every byte as a JSON number, which is slow and memory hungry for large books.
 #[tauri::command]
-pub async fn read_pdf_bytes(path: String) -> Result<Vec<u8>, AppError> {
-    std::fs::read(&path).map_err(AppError::from)
+pub async fn read_pdf_bytes(path: String) -> Result<tauri::ipc::Response, AppError> {
+    let bytes = tokio::fs::read(&path).await?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 #[tauri::command]

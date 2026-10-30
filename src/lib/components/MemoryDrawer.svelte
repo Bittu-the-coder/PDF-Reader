@@ -1,432 +1,437 @@
 <script lang="ts">
-  import { appState } from "../stores/appState.svelte";
-  import { api, type Word, type Note, type Highlight } from "../api";
-  import { isUnderlineAnnotation, getAnnotationColorName, getColorDef } from "../pdf/highlights";
+  import { appState, type MemoryTab } from "../stores/appState.svelte";
+  import { api } from "../api";
+  import { isUnderlineAnnotation, getColorDef } from "../pdf/highlights";
+  import Icon from "./Icon.svelte";
+  import { buildMarkdown } from "../exportNotes";
 
-  let searchQuery = $state("");
-  let newWordModal = $state(false);
-  let newNoteModal = $state(false);
-
-  // New word form state
-  let newWordText = $state("");
-  let newWordMeaning = $state("");
-  let newWordHindi = $state("");
-  let newWordExample = $state("");
-
-  // New note form state
-  let newNoteContent = $state("");
-
-  function jumpToPage(page?: number | null, textToFlash?: string | null) {
-    if (page) {
-      appState.jumpToPage(page, textToFlash || undefined);
+  async function handleExport() {
+    const book = appState.activeBook;
+    if (!book) return;
+    const md = buildMarkdown(
+      book,
+      { highlights: appState.highlights, notes: appState.notes, words: appState.words },
+      appState.targetLanguage,
+      (p) => appState.chapterTitleFor(p)
+    );
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const { writeTextFile } = await import("@tauri-apps/plugin-fs");
+      const safeName = book.title.replace(/[\\/:*?"<>|]+/g, " ").trim() || "notes";
+      const path = await save({
+        defaultPath: `${safeName} - notes.md`,
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+      if (!path) return;
+      await writeTextFile(path, md);
+      appState.showToast("Notes exported");
+    } catch (err) {
+      console.warn("File export unavailable, copying instead:", err);
+      try {
+        await navigator.clipboard.writeText(md);
+        appState.showToast("Copied notes as Markdown to the clipboard");
+      } catch {
+        appState.showToast("Could not export notes.", "error");
+      }
     }
   }
 
+  let searchQuery = $state("");
+  let composerOpen = $state(false);
+
+  // Composer state
+  let newWordText = $state("");
+  let newWordMeaning = $state("");
+  let newWordTranslation = $state("");
+  let newNoteContent = $state("");
+
+  // Inline note editing
+  let editingNoteId = $state<number | null>(null);
+  let editingNoteText = $state("");
+
+  const tabs: { id: MemoryTab; label: string; icon: string }[] = [
+    { id: "words", label: "Words", icon: "bookmark" },
+    { id: "notes", label: "Notes", icon: "pen" },
+    { id: "highlights", label: "Highlights", icon: "highlighter" },
+  ];
+
+  function count(tab: MemoryTab) {
+    return tab === "words" ? appState.words.length : tab === "notes" ? appState.notes.length : appState.highlights.length;
+  }
+
+  function jumpTo(page?: number | null, textToFlash?: string | null) {
+    if (!page) return;
+    appState.jumpToPage(page, textToFlash || undefined);
+    if (appState.isCompact) appState.memoryDrawerOpen = false;
+  }
+
+  async function refresh() {
+    if (appState.activeBook) await appState.refreshBookMemory(appState.activeBook.id);
+  }
+
   async function handleDeleteWord(id: number) {
-    if (!appState.activeBook) return;
     try {
       await api.deleteWord(id);
-      await appState.refreshBookMemory(appState.activeBook.id);
+      await refresh();
     } catch (err) {
+      appState.showToast("Could not delete the word.", "error");
       console.error("Failed to delete word:", err);
     }
   }
 
   async function handleDeleteNote(id: number) {
-    if (!appState.activeBook) return;
     try {
       await api.deleteNote(id);
-      await appState.refreshBookMemory(appState.activeBook.id);
+      await refresh();
     } catch (err) {
+      appState.showToast("Could not delete the note.", "error");
       console.error("Failed to delete note:", err);
     }
   }
 
-  async function handleDeleteHighlight(id: number) {
+  async function handleSaveNoteEdit(id: number) {
+    const text = editingNoteText.trim();
+    if (!text) return;
+    try {
+      await api.updateNote(id, text);
+      editingNoteId = null;
+      await refresh();
+    } catch (err) {
+      appState.showToast("Could not save the note.", "error");
+      console.error("Failed to update note:", err);
+    }
+  }
+
+  async function handleCreate() {
     if (!appState.activeBook) return;
     try {
-      await api.deleteHighlight(id);
-      await appState.refreshBookMemory(appState.activeBook.id);
+      if (appState.activeMemoryTab === "words") {
+        if (!newWordText.trim() || !newWordMeaning.trim()) return;
+        await api.addWord({
+          bookId: appState.activeBook.id,
+          word: newWordText.trim(),
+          meaning: newWordMeaning.trim(),
+          meaningHindi: newWordTranslation.trim() || null,
+          page: appState.currentPage,
+        });
+        newWordText = newWordMeaning = newWordTranslation = "";
+      } else {
+        if (!newNoteContent.trim()) return;
+        await api.addNote({
+          bookId: appState.activeBook.id,
+          content: newNoteContent.trim(),
+          page: appState.currentPage,
+        });
+        newNoteContent = "";
+      }
+      composerOpen = false;
+      await refresh();
     } catch (err) {
-      console.error("Failed to delete highlight:", err);
+      appState.showToast("Could not save. Is that word already saved?", "error");
+      console.error("Failed to add memory item:", err);
     }
   }
 
-  async function handleCreateWord() {
-    if (!appState.activeBook || !newWordText.trim() || !newWordMeaning.trim()) return;
-    try {
-      await api.addWord({
-        bookId: appState.activeBook.id,
-        word: newWordText.trim(),
-        meaning: newWordMeaning.trim(),
-        meaningHindi: newWordHindi.trim() || null,
-        exampleSentence: newWordExample.trim() || null,
-        page: appState.currentPage,
-      });
-      await appState.refreshBookMemory(appState.activeBook.id);
-      newWordModal = false;
-      newWordText = "";
-      newWordMeaning = "";
-      newWordHindi = "";
-      newWordExample = "";
-    } catch (err) {
-      console.error("Failed to add word:", err);
-    }
+  function matches(...fields: (string | null | undefined)[]) {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return fields.some((f) => f && f.toLowerCase().includes(q));
   }
 
-  async function handleCreateNote() {
-    if (!appState.activeBook || !newNoteContent.trim()) return;
-    try {
-      await api.addNote({
-        bookId: appState.activeBook.id,
-        content: newNoteContent.trim(),
-        page: appState.currentPage,
-      });
-      await appState.refreshBookMemory(appState.activeBook.id);
-      newNoteModal = false;
-      newNoteContent = "";
-    } catch (err) {
-      console.error("Failed to add note:", err);
-    }
+  /** Split a list into items on the current page(s) and the rest, newest first. */
+  function split<T extends { page: number | null; id: number }>(items: T[]) {
+    const visible = new Set([appState.currentPage]);
+    if (appState.layoutMode === "dual") visible.add(appState.currentPage + 1);
+    const sorted = [...items].sort((a, b) => b.id - a.id);
+    return {
+      here: sorted.filter((i) => i.page != null && visible.has(i.page)),
+      elsewhere: sorted.filter((i) => i.page == null || !visible.has(i.page)),
+    };
   }
 
-  // Filtered lists
-  let filteredWords = $derived.by(() => {
-    if (!searchQuery.trim()) return appState.words;
-    const q = searchQuery.toLowerCase();
-    return appState.words.filter(
-      (w) =>
-        w.word.toLowerCase().includes(q) ||
-        w.meaning.toLowerCase().includes(q) ||
-        (w.meaning_hindi && w.meaning_hindi.toLowerCase().includes(q))
-    );
-  });
+  let words = $derived(split(appState.words.filter((w) => matches(w.word, w.meaning, w.meaning_hindi))));
+  let notes = $derived(split(appState.notes.filter((n) => matches(n.content, n.quote))));
+  let highlights = $derived(split(appState.highlights.filter((h) => matches(h.text))));
 
-  let filteredNotes = $derived.by(() => {
-    if (!searchQuery.trim()) return appState.notes;
-    const q = searchQuery.toLowerCase();
-    return appState.notes.filter((n) => n.content.toLowerCase().includes(q));
-  });
+  let activeGroups = $derived(
+    appState.activeMemoryTab === "words" ? words : appState.activeMemoryTab === "notes" ? notes : highlights
+  );
+  let isEmpty = $derived(activeGroups.here.length + activeGroups.elsewhere.length === 0);
 
-  // Priority sorting: Items for the current page appear at the very top!
-  let sortedWords = $derived.by(() => {
-    const list = [...filteredWords];
-    const curr = appState.currentPage;
-    return list.sort((a, b) => {
-      const aIsCurrent = a.page === curr ? 1 : 0;
-      const bIsCurrent = b.page === curr ? 1 : 0;
-      if (aIsCurrent !== bIsCurrent) return bIsCurrent - aIsCurrent;
-      return (b.id || 0) - (a.id || 0);
-    });
-  });
-
-  let sortedNotes = $derived.by(() => {
-    const list = [...filteredNotes];
-    const curr = appState.currentPage;
-    return list.sort((a, b) => {
-      const aIsCurrent = a.page === curr ? 1 : 0;
-      const bIsCurrent = b.page === curr ? 1 : 0;
-      if (aIsCurrent !== bIsCurrent) return bIsCurrent - aIsCurrent;
-      return (b.id || 0) - (a.id || 0);
-    });
-  });
-
-  let sortedHighlights = $derived.by(() => {
-    const list = [...appState.highlights];
-    const curr = appState.currentPage;
-    return list.sort((a, b) => {
-      const aIsCurrent = a.page === curr ? 1 : 0;
-      const bIsCurrent = b.page === curr ? 1 : 0;
-      if (aIsCurrent !== bIsCurrent) return bIsCurrent - aIsCurrent;
-      return (b.id || 0) - (a.id || 0);
-    });
+  $effect(() => {
+    // Reset transient UI when switching tabs
+    appState.activeMemoryTab;
+    composerOpen = false;
+    editingNoteId = null;
   });
 </script>
 
-<aside class="memory-drawer {appState.memoryDrawerOpen ? 'visible' : ''}">
+{#snippet wordCard(w: (typeof appState.words)[number])}
+  <article class="memory-card">
+    <div class="card-top">
+      <button type="button" class="card-title-btn" onclick={() => jumpTo(w.page, w.word)} title="Find on page {w.page}">
+        {w.word}
+      </button>
+      {#if w.page}
+        <button type="button" class="page-tag" onclick={() => jumpTo(w.page, w.word)}>p. {w.page}</button>
+      {/if}
+      <button class="delete-btn" onclick={() => handleDeleteWord(w.id)} title="Delete word" aria-label="Delete {w.word}">
+        <Icon name="trash" size={14} />
+      </button>
+    </div>
+    <p class="card-meaning">{w.meaning}</p>
+    {#if w.meaning_hindi}
+      <p class="card-translation"><span class="lang-tag">{appState.targetLanguage}</span>{w.meaning_hindi}</p>
+    {/if}
+    {#if w.example_sentence}
+      <p class="card-example">“{w.example_sentence}”</p>
+    {/if}
+  </article>
+{/snippet}
+
+{#snippet noteCard(n: (typeof appState.notes)[number])}
+  <article class="memory-card">
+    <div class="card-top">
+      <span class="note-date">{new Date(n.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>
+      {#if n.page}
+        <button type="button" class="page-tag" onclick={() => jumpTo(n.page, n.quote || n.content)}>p. {n.page}</button>
+      {/if}
+      <button
+        class="delete-btn"
+        onclick={() => {
+          editingNoteId = n.id;
+          editingNoteText = n.content;
+        }}
+        title="Edit note"
+        aria-label="Edit note"
+      >
+        <Icon name="pen" size={14} />
+      </button>
+      <button class="delete-btn" onclick={() => handleDeleteNote(n.id)} title="Delete note" aria-label="Delete note">
+        <Icon name="trash" size={14} />
+      </button>
+    </div>
+    {#if n.quote}
+      <button type="button" class="card-quote" onclick={() => jumpTo(n.page, n.quote)} title="Find this passage">
+        {n.quote}
+      </button>
+    {/if}
+    {#if editingNoteId === n.id}
+      <!-- svelte-ignore a11y_autofocus -->
+      <textarea
+        class="edit-area"
+        bind:value={editingNoteText}
+        rows="4"
+        autofocus
+        onkeydown={(e) => {
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleSaveNoteEdit(n.id);
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            editingNoteId = null;
+          }
+        }}
+      ></textarea>
+      <div class="edit-actions">
+        <button class="btn-ghost sm" onclick={() => (editingNoteId = null)}>Cancel</button>
+        <button class="btn-primary sm" onclick={() => handleSaveNoteEdit(n.id)} disabled={!editingNoteText.trim()}>Save</button>
+      </div>
+    {:else}
+      <p class="card-note-content">{n.content}</p>
+    {/if}
+  </article>
+{/snippet}
+
+{#snippet highlightCard(h: (typeof appState.highlights)[number])}
+  {@const colorDef = getColorDef(h.color)}
+  {@const underline = isUnderlineAnnotation(h.color)}
+  <article class="memory-card highlight-card" style="--hl: {colorDef.color};">
+    <div class="card-top">
+      <span class="type-pill">
+        <Icon name={underline ? "underline" : "highlighter"} size={12} />
+        {underline ? "Underline" : "Highlight"}
+      </span>
+      <button type="button" class="page-tag" onclick={() => jumpTo(h.page, h.text)}>p. {h.page}</button>
+      <button class="delete-btn" onclick={() => appState.removeHighlight(h.id)} title="Delete annotation" aria-label="Delete annotation">
+        <Icon name="trash" size={14} />
+      </button>
+    </div>
+    <button type="button" class="highlight-text" class:underline onclick={() => jumpTo(h.page, h.text)} title="Find this passage">
+      {h.text}
+    </button>
+  </article>
+{/snippet}
+
+{#snippet group(title: string, items: any[])}
+  {#if items.length > 0}
+    <section class="group">
+      <h4 class="group-title">{title}<span>{items.length}</span></h4>
+      <div class="items-list">
+        {#each items as item (item.id)}
+          {#if appState.activeMemoryTab === "words"}
+            {@render wordCard(item)}
+          {:else if appState.activeMemoryTab === "notes"}
+            {@render noteCard(item)}
+          {:else}
+            {@render highlightCard(item)}
+          {/if}
+        {/each}
+      </div>
+    </section>
+  {/if}
+{/snippet}
+
+<aside
+  class="memory-drawer"
+  class:visible={appState.memoryDrawerOpen}
+  class:overlay={appState.isCompact}
+  aria-label="Book memory"
+  aria-hidden={!appState.memoryDrawerOpen}
+  inert={!appState.memoryDrawerOpen}
+>
   <div class="drawer-header">
     <div class="header-title">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-        <path d="M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1Z"/>
-      </svg>
-      <span>Book Memory</span>
+      <Icon name="brain" size={18} />
+      <span>Book memory</span>
     </div>
     <div class="header-actions">
-      <button class="icon-btn-sm" onclick={() => (appState.memoryDrawerOpen = false)} title="Close Memory">✕</button>
+      <button
+        class="icon-btn"
+        onclick={handleExport}
+        disabled={appState.highlights.length + appState.notes.length + appState.words.length === 0}
+        title="Export highlights, notes & words (Markdown)"
+        aria-label="Export"
+      >
+        <Icon name="upload" size={16} />
+      </button>
+      <button class="icon-btn" onclick={() => (appState.memoryDrawerOpen = false)} title="Close (Esc)" aria-label="Close book memory">
+        <Icon name="x" size={17} />
+      </button>
     </div>
   </div>
 
-  <!-- Tabs: Vocabulary, Notes, Highlights -->
-  <div class="drawer-tabs">
-    <button
-      class="tab-btn {appState.activeMemoryTab === 'words' ? 'active' : ''}"
-      onclick={() => (appState.activeMemoryTab = "words")}
-    >
-      Vocabulary ({appState.words.length})
+  {#if appState.activeMemoryTab === "words" && appState.words.length > 0}
+    <button class="review-banner" onclick={() => (appState.reviewOpen = true)}>
+      <Icon name="sparkles" size={16} />
+      <span class="review-text">
+        <strong>Review words</strong>
+        <span>{appState.dueCount > 0 ? `${appState.dueCount} due now` : "All caught up"}</span>
+      </span>
+      <Icon name="chevron-right" size={16} />
     </button>
-    <button
-      class="tab-btn {appState.activeMemoryTab === 'notes' ? 'active' : ''}"
-      onclick={() => (appState.activeMemoryTab = "notes")}
-    >
-      Notes ({appState.notes.length})
-    </button>
-    <button
-      class="tab-btn {appState.activeMemoryTab === 'highlights' ? 'active' : ''}"
-      onclick={() => (appState.activeMemoryTab = "highlights")}
-    >
-      Highlights ({appState.highlights.length})
-    </button>
+  {/if}
+
+  <div class="drawer-tabs" role="tablist">
+    {#each tabs as t}
+      <button
+        class="tab-btn"
+        class:active={appState.activeMemoryTab === t.id}
+        role="tab"
+        aria-selected={appState.activeMemoryTab === t.id}
+        onclick={() => (appState.activeMemoryTab = t.id)}
+      >
+        <span>{t.label}</span>
+        <span class="tab-count">{count(t.id)}</span>
+      </button>
+    {/each}
   </div>
 
-  <!-- Search bar & Add Button -->
   <div class="drawer-toolbar">
-    <input
-      type="text"
-      bind:value={searchQuery}
-      placeholder="Filter..."
-      class="search-input"
-    />
-    {#if appState.activeMemoryTab === "words"}
-      <button class="add-btn" onclick={() => (newWordModal = true)}>+ Word</button>
-    {:else if appState.activeMemoryTab === "notes"}
-      <button class="add-btn" onclick={() => (newNoteModal = true)}>+ Note</button>
+    <div class="search-field">
+      <Icon name="search" size={14} />
+      <input type="search" bind:value={searchQuery} placeholder="Search {appState.activeMemoryTab}…" aria-label="Search" />
+    </div>
+    {#if appState.activeMemoryTab !== "highlights"}
+      <button class="add-btn" class:active={composerOpen} onclick={() => (composerOpen = !composerOpen)} title="Add manually">
+        <Icon name={composerOpen ? "x" : "plus"} size={15} />
+        <span>Add</span>
+      </button>
     {/if}
   </div>
 
+  {#if composerOpen}
+    <form
+      class="composer"
+      onsubmit={(e) => {
+        e.preventDefault();
+        handleCreate();
+      }}
+    >
+      {#if appState.activeMemoryTab === "words"}
+        <input type="text" bind:value={newWordText} placeholder="Word" required />
+        <textarea bind:value={newWordMeaning} placeholder="Meaning" rows="2" required></textarea>
+        <input type="text" bind:value={newWordTranslation} placeholder="{appState.targetLanguage} translation (optional)" />
+      {:else}
+        <textarea bind:value={newNoteContent} placeholder="Note for page {appState.currentPage}…" rows="3" required></textarea>
+      {/if}
+      <div class="edit-actions">
+        <button type="button" class="btn-ghost sm" onclick={() => (composerOpen = false)}>Cancel</button>
+        <button type="submit" class="btn-primary sm">Save</button>
+      </div>
+    </form>
+  {/if}
+
   <div class="drawer-content">
-    {#if appState.activeMemoryTab === "words"}
-      {#if sortedWords.length === 0}
-        <div class="empty-state">No saved words found. Select text in the document to look up and save words!</div>
-      {:else}
-        <div class="items-list">
-          {#each sortedWords as w (w.id)}
-            <div class="memory-card {w.page === appState.currentPage ? 'current-page-card' : ''}">
-              <div class="card-top">
-                <button
-                  type="button"
-                  class="card-word-btn"
-                  onclick={() => jumpToPage(w.page, w.word)}
-                  title="Jump to page {w.page} and locate word"
-                >
-                  {w.word}
-                </button>
-                {#if w.page}
-                  <button
-                    type="button"
-                    class="page-tag {w.page === appState.currentPage ? 'active-page-tag' : ''}"
-                    onclick={() => jumpToPage(w.page, w.word)}
-                    title={w.page === appState.currentPage ? "Current Page" : `Go to page ${w.page}`}
-                  >
-                    {w.page === appState.currentPage ? `📍 Page ${w.page}` : `p. ${w.page}`}
-                  </button>
-                {/if}
-                <button class="delete-btn" onclick={() => handleDeleteWord(w.id)} title="Delete word">×</button>
-              </div>
-              <div class="card-meaning">{w.meaning}</div>
-              {#if w.meaning_hindi}
-                <div class="card-hindi">
-                  <span class="lang-tag-hi">{appState.targetLanguage}</span>
-                  <span>{w.meaning_hindi}</span>
-                </div>
-              {/if}
-              {#if w.example_sentence}
-                <div class="card-example">"{w.example_sentence}"</div>
-              {/if}
-            </div>
-          {/each}
+    {#if isEmpty}
+      <div class="empty-state">
+        <div class="empty-icon">
+          <Icon name={tabs.find((t) => t.id === appState.activeMemoryTab)?.icon ?? "brain"} size={22} />
         </div>
-      {/if}
-    {:else if appState.activeMemoryTab === "notes"}
-      {#if sortedNotes.length === 0}
-        <div class="empty-state">No notes added yet. Add a note from selection or the + Note button!</div>
-      {:else}
-        <div class="items-list">
-          {#each sortedNotes as n (n.id)}
-            <div class="memory-card {n.page === appState.currentPage ? 'current-page-card' : ''}">
-              <div class="card-top">
-                <span class="note-date">{new Date(n.created_at).toLocaleDateString()}</span>
-                {#if n.page}
-                  <button
-                    type="button"
-                    class="page-tag {n.page === appState.currentPage ? 'active-page-tag' : ''}"
-                    onclick={() => jumpToPage(n.page, n.quote || n.content)}
-                    title={n.page === appState.currentPage ? "Current Page" : `Go to page ${n.page} and locate note`}
-                  >
-                    {n.page === appState.currentPage ? `📍 Page ${n.page}` : `p. ${n.page}`}
-                  </button>
-                {/if}
-                <button class="delete-btn" onclick={() => handleDeleteNote(n.id)} title="Delete note">×</button>
-              </div>
-              {#if n.quote}
-                <div
-                  class="card-quote clickable"
-                  onclick={() => jumpToPage(n.page, n.quote)}
-                  role="button"
-                  tabindex="0"
-                  onkeydown={(e) => e.key === "Enter" && jumpToPage(n.page, n.quote)}
-                  title="Locate quote on page"
-                >
-                  "{n.quote}"
-                </div>
-              {/if}
-              <div
-                class="card-note-content"
-                onclick={() => jumpToPage(n.page, n.quote || n.content)}
-                role="button"
-                tabindex="0"
-                onkeydown={(e) => e.key === "Enter" && jumpToPage(n.page, n.quote || n.content)}
-                title="Locate on page"
-              >
-                {n.content}
-              </div>
-            </div>
-          {/each}
-        </div>
-      {/if}
-    {:else if appState.activeMemoryTab === "highlights"}
-      {#if sortedHighlights.length === 0}
-        <div class="empty-state">No highlights yet. Select text in the reader to highlight!</div>
-      {:else}
-        <div class="items-list">
-          {#each sortedHighlights as h (h.id)}
-            {@const isUnderline = isUnderlineAnnotation(h.color)}
-            {@const colorName = getAnnotationColorName(h.color)}
-            {@const colorDef = getColorDef(h.color)}
-            <div class="memory-card highlight-card {h.page === appState.currentPage ? 'current-page-card' : ''}">
-              <div class="card-top">
-                <div class="tag-group">
-                  <button
-                    type="button"
-                    class="page-tag {h.page === appState.currentPage ? 'active-page-tag' : ''}"
-                    onclick={() => jumpToPage(h.page, h.text)}
-                    title={h.page === appState.currentPage ? "Current Page" : `Go to page ${h.page}`}
-                  >
-                    {h.page === appState.currentPage ? `📍 Page ${h.page}` : `Page ${h.page}`}
-                  </button>
-                  <span class="type-pill {isUnderline ? 'underline' : 'highlight'}">
-                    <span class="color-dot-indicator" style="background: {colorDef?.color || '#facc15'};"></span>
-                    {isUnderline ? 'Underline' : 'Highlight'}
-                  </span>
-                </div>
-                <button class="delete-btn" onclick={() => handleDeleteHighlight(h.id)} title="Delete annotation">×</button>
-              </div>
-              <div
-                class="highlight-text {isUnderline ? 'underline-text' : ''}"
-                style="{isUnderline ? `border-bottom-color: ${colorDef?.color || '#facc15'};` : `border-left: 3px solid ${colorDef?.color || '#facc15'}; background: ${colorDef?.color || '#facc15'}18;`}"
-              >
-                "{h.text}"
-              </div>
-            </div>
-          {/each}
-        </div>
-      {/if}
+        {#if searchQuery.trim()}
+          <p>Nothing matches “{searchQuery.trim()}”.</p>
+        {:else if appState.activeMemoryTab === "words"}
+          <p><strong>No saved words yet.</strong></p>
+          <p>Double-click any word in the book to see its meaning, then save it here.</p>
+        {:else if appState.activeMemoryTab === "notes"}
+          <p><strong>No notes yet.</strong></p>
+          <p>Select a passage and choose <em>Note</em>, or add one manually.</p>
+        {:else}
+          <p><strong>No highlights yet.</strong></p>
+          <p>Select text and pick a color to highlight or underline it.</p>
+        {/if}
+      </div>
+    {:else}
+      {@render group(appState.layoutMode === "dual" ? "On these pages" : "On this page", activeGroups.here)}
+      {@render group("Elsewhere in the book", activeGroups.elsewhere)}
     {/if}
   </div>
 </aside>
 
-<!-- Add Word Modal -->
-{#if newWordModal}
-  <div
-    class="modal-backdrop"
-    onclick={() => (newWordModal = false)}
-    onkeydown={(e) => e.key === "Escape" && (newWordModal = false)}
-    role="dialog"
-    tabindex="-1"
-  >
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div class="modal" onclick={(e) => e.stopPropagation()} role="presentation">
-      <h3>Add New Word</h3>
-      <input type="text" bind:value={newWordText} placeholder="Word (e.g. Ephemeral)" />
-      <textarea bind:value={newWordMeaning} placeholder="Meaning / Definition (English)" rows="2"></textarea>
-      <input type="text" bind:value={newWordHindi} placeholder="{appState.targetLanguage} Meaning / अनुवाद (optional)" />
-      <textarea bind:value={newWordExample} placeholder="Example Sentence (optional)" rows="2"></textarea>
-      <div class="modal-actions">
-        <button class="btn-ghost" onclick={() => (newWordModal = false)}>Cancel</button>
-        <button class="btn-primary" onclick={handleCreateWord}>Save Word</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-<!-- Add Note Modal -->
-{#if newNoteModal}
-  <div
-    class="modal-backdrop"
-    onclick={() => (newNoteModal = false)}
-    onkeydown={(e) => e.key === "Escape" && (newNoteModal = false)}
-    role="dialog"
-    tabindex="-1"
-  >
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div class="modal" onclick={(e) => e.stopPropagation()} role="presentation">
-      <h3>Add New Note</h3>
-      <textarea bind:value={newNoteContent} placeholder="Write note..." rows="4"></textarea>
-      <div class="modal-actions">
-        <button class="btn-ghost" onclick={() => (newNoteModal = false)}>Cancel</button>
-        <button class="btn-primary" onclick={handleCreateNote}>Save Note</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
 <style>
   .memory-drawer {
-    width: 310px;
-    background: var(--bg-surface-elevated);
+    width: 340px;
+    background: var(--bg-surface);
     border-left: 1px solid var(--border-subtle);
     display: flex;
     flex-direction: column;
     height: 100%;
     position: relative;
     flex-shrink: 0;
-    box-shadow: var(--shadow-sm);
+    z-index: 90;
   }
 
   .memory-drawer:not(.visible) {
     display: none;
   }
 
-  .current-page-card {
-    border-color: var(--accent) !important;
-    background: var(--bg-surface-elevated);
-    box-shadow: 0 0 0 1px var(--accent-subtle, rgba(234, 179, 8, 0.25));
+  .memory-drawer.overlay {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 96;
+    width: min(380px, 92vw);
+    box-shadow: var(--shadow-lg);
+    animation: slideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
-  .active-page-tag {
-    background: var(--accent-subtle, rgba(234, 179, 8, 0.15)) !important;
-    border: 1px solid var(--accent) !important;
-    color: var(--accent) !important;
-    font-weight: 600;
-  }
-
-  .card-hindi {
-    font-size: 12px;
-    color: var(--text-primary);
-    background: var(--bg-surface);
-    padding: 4px 8px;
-    border-radius: var(--radius-xs, 4px);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    border: 1px solid var(--border-subtle);
-  }
-
-  .lang-tag-hi {
-    font-size: 10px;
-    font-weight: 700;
-    color: #eab308;
-    background: rgba(234, 179, 8, 0.15);
-    padding: 1px 4px;
-    border-radius: 3px;
-  }
-
-  @keyframes slideInRight {
+  @keyframes slideIn {
     from {
-      transform: translateX(100%);
+      transform: translateX(24px);
+      opacity: 0;
     }
     to {
-      transform: translateX(0);
+      transform: none;
+      opacity: 1;
     }
   }
 
@@ -434,88 +439,215 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border-subtle);
+    padding: 10px 8px 6px 16px;
   }
 
   .header-title {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 650;
+    color: var(--text-primary);
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 2px;
+  }
+
+  .review-banner {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    margin: 4px 12px 2px;
+    padding: 10px 12px;
+    text-align: left;
+    color: var(--accent);
+    background: var(--accent-subtle);
+    border-radius: var(--radius-md);
+  }
+
+  .review-banner:hover {
+    filter: brightness(1.1);
+  }
+
+  .review-text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  .review-text strong {
+    font-size: 13px;
+    color: var(--text-primary);
+  }
+
+  .review-text span {
+    font-size: 12px;
+    color: var(--text-secondary);
   }
 
   .drawer-tabs {
-    display: flex;
-    border-bottom: 1px solid var(--border-subtle);
-    background: var(--bg-surface);
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    margin: 6px 12px;
+    padding: 3px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
   }
 
   .tab-btn {
-    flex: 1;
-    padding: 8px 4px;
-    font-size: 11px;
+    height: 30px;
+    gap: 6px;
+    font-size: 12.5px;
     font-weight: 500;
     color: var(--text-secondary);
-    border-bottom: 2px solid transparent;
-    border-radius: 0;
+    border-radius: var(--radius-sm);
+  }
+
+  .tab-btn:hover {
+    color: var(--text-primary);
   }
 
   .tab-btn.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
     background: var(--bg-surface-elevated);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .tab-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tab-btn.active .tab-count {
+    color: var(--accent);
   }
 
   .drawer-toolbar {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border-subtle);
+    gap: 6px;
+    padding: 6px 12px 10px;
   }
 
-  .search-input {
+  .search-field {
     flex: 1;
-    height: 28px;
-    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 10px;
+    height: 32px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+  }
+
+  .search-field:focus-within {
+    border-color: var(--accent);
+  }
+
+  .search-field input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    padding: 0;
+    height: 100%;
   }
 
   .add-btn {
+    height: 32px;
     padding: 0 10px;
-    height: 28px;
-    background: var(--accent);
-    color: var(--accent-text);
-    font-size: 12px;
-    font-weight: 500;
-    flex-shrink: 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-subtle);
   }
 
-  .add-btn:hover {
-    background: var(--accent-hover);
+  .add-btn:hover,
+  .add-btn.active {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+
+  .composer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 12px 10px;
+    padding: 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+  }
+
+  .composer textarea,
+  .edit-area {
+    resize: vertical;
+    min-height: 56px;
+    line-height: 1.5;
+  }
+
+  .edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .btn-ghost.sm,
+  .btn-primary.sm {
+    height: 28px;
+    font-size: 12.5px;
   }
 
   .drawer-content {
     flex: 1;
     overflow-y: auto;
-    padding: 12px;
+    padding: 2px 12px 24px;
+    overscroll-behavior: contain;
+  }
+
+  .group + .group {
+    margin-top: 18px;
+  }
+
+  .group-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin: 4px 2px 8px;
+  }
+
+  .group-title span {
+    font-weight: 500;
+    letter-spacing: 0;
   }
 
   .items-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
   }
 
   .memory-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    padding: 10px;
     display: flex;
     flex-direction: column;
     gap: 6px;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
     transition: border-color var(--transition-fast);
   }
 
@@ -526,216 +658,200 @@
   .card-top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-  }
-
-  .card-word-btn {
-    background: transparent;
-    border: none;
-    padding: 0;
-    font-family: inherit;
-    font-weight: 600;
-    font-size: 13px;
-    color: var(--text-primary);
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .card-word-btn:hover {
-    color: var(--accent);
-  }
-
-  .page-tag {
-    background: var(--bg-hover);
-    border: none;
-    font-family: inherit;
-    font-size: 10px;
-    color: var(--text-muted);
-    padding: 2px 7px;
-    border-radius: var(--radius-full);
-    cursor: pointer;
-    margin-left: auto;
-    margin-right: 6px;
-    transition: all 0.15s ease;
-  }
-
-  .page-tag:hover {
-    color: var(--accent);
-    background: var(--hover-bg, rgba(255, 255, 255, 0.12));
-  }
-
-  .delete-btn {
-    width: 18px;
-    height: 18px;
-    font-size: 14px;
-    color: var(--text-muted);
-    line-height: 1;
-  }
-
-  .delete-btn:hover {
-    color: var(--danger);
-  }
-
-  .card-meaning {
-    font-size: 12px;
-    color: var(--text-secondary);
-  }
-
-  .card-example, .card-quote {
-    font-size: 11px;
-    font-style: italic;
-    color: var(--text-muted);
-    border-left: 2px solid var(--accent);
-    padding-left: 6px;
-  }
-
-  .card-quote.clickable {
-    cursor: pointer;
-    transition: color 0.15s ease;
-  }
-
-  .card-quote.clickable:hover {
-    color: var(--accent);
-  }
-
-  .card-note-content {
-    font-size: 12px;
-    color: var(--text-primary);
-    white-space: pre-wrap;
-    cursor: pointer;
-    transition: color 0.15s ease;
-  }
-
-  .card-note-content:hover {
-    color: var(--accent);
-  }
-
-  .tag-group {
-    display: flex;
-    align-items: center;
     gap: 6px;
-    margin-left: auto;
-    margin-right: 6px;
+    min-height: 24px;
   }
 
-  .type-pill {
-    font-size: 9px;
+  .card-title-btn {
+    flex: 1;
+    justify-content: flex-start;
+    text-align: left;
+    font-family: var(--font-reading);
+    font-size: 16px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    padding: 1px 6px;
-    border-radius: var(--radius-full);
-  }
-
-  .type-pill.highlight {
-    background: rgba(250, 204, 21, 0.2);
-    color: #eab308;
-    border: 1px solid rgba(234, 179, 8, 0.35);
-  }
-
-  .type-pill.underline {
-    background: rgba(99, 102, 241, 0.15);
-    color: var(--accent);
-    border: 1px solid rgba(99, 102, 241, 0.3);
-  }
-
-  .highlight-text {
-    font-size: 12px;
     color: var(--text-primary);
-    font-style: italic;
+    padding: 0;
+    min-width: 0;
+    word-break: break-word;
   }
 
-  .highlight-text.underline-text {
-    text-decoration: underline 1.5px #eab308;
-    text-underline-offset: 3px;
+  .card-title-btn:hover {
+    color: var(--accent);
   }
 
   .note-date {
-    font-size: 10px;
+    flex: 1;
+    font-size: 11.5px;
     color: var(--text-muted);
   }
 
-  .empty-state {
-    font-size: 12px;
-    color: var(--text-muted);
-    text-align: center;
-    padding: 32px 16px;
-    line-height: 1.6;
-  }
-
-  /* Modals */
-  .modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 200;
-  }
-
-  .modal {
-    width: 360px;
-    background: var(--bg-surface-elevated);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    box-shadow: var(--shadow-lg);
-  }
-
-  .modal h3 {
-    font-size: 15px;
+  .page-tag {
+    height: 22px;
+    padding: 0 8px;
+    font-size: 11px;
     font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-active);
+    border-radius: var(--radius-full);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
   }
 
-  .modal-actions {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 4px;
+  .page-tag:hover {
+    background: var(--accent-subtle);
+    color: var(--accent);
   }
 
-  .btn-ghost {
-    padding: 6px 12px;
+  .delete-btn {
+    width: 26px;
+    height: 26px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    opacity: 0;
+  }
+
+  .memory-card:hover .delete-btn,
+  .memory-card:focus-within .delete-btn {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .delete-btn {
+      opacity: 1;
+    }
+  }
+
+  .delete-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .card-meaning {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-primary);
+  }
+
+  .card-translation {
+    font-size: 13px;
+    line-height: 1.5;
     color: var(--text-secondary);
   }
 
-  .btn-primary {
-    padding: 6px 14px;
-    background: var(--accent);
-    color: var(--accent-text);
-    font-weight: 500;
+  .lang-tag {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    background: var(--accent-subtle);
+    border-radius: var(--radius-xs);
+    padding: 0 5px;
+    margin-right: 6px;
+    vertical-align: 1px;
   }
 
-  .color-dot-indicator {
-    display: inline-block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    margin-right: 4px;
-    vertical-align: middle;
+  .card-example {
+    font-size: 12.5px;
+    font-style: italic;
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
+
+  .card-quote {
+    display: block;
+    text-align: left;
+    font-family: var(--font-reading);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    border-left: 2px solid var(--border-strong);
+    border-radius: 0;
+    padding: 0 0 0 10px;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-quote:hover {
+    color: var(--text-primary);
+    border-left-color: var(--accent);
+  }
+
+  .card-note-content {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
   }
 
   .type-pill {
+    flex: 1;
     display: inline-flex;
     align-items: center;
+    gap: 5px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
   }
 
-  @media (max-width: 768px) {
-    .memory-drawer {
-      position: fixed;
-      right: 0;
-      top: 0;
-      bottom: 0;
-      width: min(340px, 88vw);
-      z-index: 600;
-      box-shadow: -8px 0 32px rgba(0, 0, 0, 0.5);
-      animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    }
+  .type-pill :global(svg) {
+    color: var(--hl);
+  }
+
+  .highlight-text {
+    display: -webkit-box;
+    -webkit-line-clamp: 6;
+    line-clamp: 6;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-align: left;
+    font-family: var(--font-reading);
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    padding: 2px 0 2px 10px;
+    border-left: 3px solid var(--hl);
+    border-radius: 0;
+  }
+
+  .highlight-text.underline {
+    border-left-style: dashed;
+  }
+
+  .highlight-text:hover {
+    color: var(--accent);
+  }
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 48px 20px;
+    text-align: center;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-muted);
+  }
+
+  .empty-state strong {
+    color: var(--text-secondary);
+  }
+
+  .empty-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
   }
 </style>

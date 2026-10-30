@@ -1,42 +1,54 @@
 :root {
-  /* Default: Dark Theme (Zen style) */
-  --bg-primary: #121214;
-  --bg-secondary: #1a1a1e;
-  --bg-surface: #222228;
-  --bg-surface-elevated: #2a2a32;
-  --bg-hover: rgba(255, 255, 255, 0.07);
-  --bg-active: rgba(255, 255, 255, 0.12);
-  --bg-glass: rgba(22, 22, 26, 0.85);
+  /* Default: Dark Theme */
+  --bg-primary: #111113;
+  --bg-secondary: #18181b;
+  --bg-surface: #1d1d21;
+  --bg-surface-elevated: #26262b;
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(255, 255, 255, 0.1);
+  --bg-glass: rgba(24, 24, 27, 0.82);
 
-  --text-primary: #f0f0f4;
-  --text-secondary: #a0a0aa;
-  --text-muted: #666672;
+  --text-primary: #ededf0;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
 
-  --border-subtle: rgba(255, 255, 255, 0.08);
-  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-subtle: rgba(255, 255, 255, 0.07);
+  --border-strong: rgba(255, 255, 255, 0.13);
 
-  --accent: #6366f1;
-  --accent-hover: #4f46e5;
-  --accent-subtle: rgba(99, 102, 241, 0.15);
-  --accent-text: #ffffff;
+  --accent: #818cf8;
+  --accent-hover: #6366f1;
+  --accent-subtle: rgba(129, 140, 248, 0.14);
+  --accent-text: #0b0b1a;
 
-  --success: #10b981;
-  --warning: #f59e0b;
-  --danger: #ef4444;
+  --success: #34d399;
+  --success-subtle: rgba(52, 211, 153, 0.12);
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --danger-subtle: rgba(248, 113, 113, 0.14);
 
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.65);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-page: 0 2px 6px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.35);
 
+  --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 10px;
   --radius-lg: 14px;
   --radius-full: 9999px;
 
-  --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
-  --transition-normal: 250ms cubic-bezier(0.16, 1, 0.3, 1);
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "Inter", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-reading: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
 
-  --pdf-bg: #1e1e24;
+  --chrome-height: 48px;
+  --tabs-height: 36px;
+
+  --transition-fast: 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-normal: 240ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  --pdf-bg: #0c0c0e;
+
+  color-scheme: dark;
 }
 
 [data-theme="light"] {
@@ -57,14 +69,22 @@
 
   --accent: #4f46e5;
   --accent-hover: #4338ca;
-  --accent-subtle: rgba(79, 70, 229, 0.1);
+  --accent-subtle: rgba(79, 70, 229, 0.09);
   --accent-text: #ffffff;
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
   --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.12);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
+  --shadow-page: 0 1px 3px rgba(0, 0, 0, 0.1), 0 8px 24px rgba(0, 0, 0, 0.08);
 
-  --pdf-bg: #ececee;
+  --success: #059669;
+  --success-subtle: rgba(5, 150, 105, 0.1);
+  --danger: #dc2626;
+  --danger-subtle: rgba(220, 38, 38, 0.08);
+
+  --pdf-bg: #e9e9ec;
+
+  color-scheme: light;
 }
 
 [data-theme="sepia"] {
@@ -90,9 +110,17 @@
 
   --shadow-sm: 0 1px 3px rgba(70, 40, 10, 0.08);
   --shadow-md: 0 4px 14px rgba(70, 40, 10, 0.1);
-  --shadow-lg: 0 10px 30px rgba(70, 40, 10, 0.15);
+  --shadow-lg: 0 16px 40px rgba(70, 40, 10, 0.16);
+  --shadow-page: 0 1px 3px rgba(70, 40, 10, 0.12), 0 8px 24px rgba(70, 40, 10, 0.1);
 
-  --pdf-bg: #ede4d2;
+  --success: #4d7c0f;
+  --success-subtle: rgba(77, 124, 15, 0.1);
+  --danger: #b91c1c;
+  --danger-subtle: rgba(185, 28, 28, 0.08);
+
+  --pdf-bg: #e8dec9;
+
+  color-scheme: light;
 }
 
 [data-theme="eyecare"] {
@@ -118,9 +146,13 @@
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
   --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.7);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.7);
+  --shadow-page: 0 2px 6px rgba(0, 0, 0, 0.5), 0 12px 32px rgba(0, 0, 0, 0.45);
+  --accent-text: #1c130a;
 
   --pdf-bg: #18140f;
+
+  color-scheme: dark;
 }
 
 [data-theme="invert"] {
@@ -146,9 +178,12 @@
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.8);
   --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.9);
-  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.95);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.95);
+  --shadow-page: 0 0 0 1px rgba(255, 255, 255, 0.12);
 
   --pdf-bg: #000000;
+
+  color-scheme: dark;
 }
 
 /* ============================================================
@@ -159,8 +194,7 @@
   filter: invert(0.88) hue-rotate(180deg) contrast(1.06) brightness(0.95);
 }
 [data-theme="dark"] .page-container {
-  background: #18181b !important;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.75) !important;
+  background: #1b1b1e !important;
 }
 
 [data-theme="eyecare"] .pdf-canvas {
@@ -169,7 +203,6 @@
 }
 [data-theme="eyecare"] .page-container {
   background: #fdf3dc !important;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6) !important;
 }
 
 [data-theme="sepia"] .pdf-canvas {
@@ -178,7 +211,6 @@
 }
 [data-theme="sepia"] .page-container {
   background: #fbf7ee !important;
-  box-shadow: 0 4px 18px rgba(70, 40, 10, 0.15) !important;
 }
 
 [data-theme="invert"] .pdf-canvas {
@@ -187,8 +219,6 @@
 }
 [data-theme="invert"] .page-container {
   background: #000000 !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  box-shadow: 0 0 20px rgba(255, 255, 255, 0.05) !important;
 }
 
 [data-theme="light"] .pdf-canvas {
@@ -222,13 +252,15 @@ html, body {
   overflow: hidden;
   margin: 0;
   padding: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-ui);
   font-size: 14px;
   line-height: 1.5;
   background-color: var(--bg-primary);
   color: var(--text-primary);
   user-select: none;
   -webkit-font-smoothing: antialiased;
+  /* Touchscreen pinch would zoom the whole UI; the reader handles it for the PDF */
+  touch-action: pan-x pan-y;
 }
 
 button {
@@ -246,9 +278,105 @@ button {
   transition: background-color var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
 }
 
-button:focus-visible {
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+/* Shared building blocks */
+.spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2.5px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: spin 0.75s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  position: relative;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.icon-btn.active {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.btn-primary {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn-ghost {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 input, textarea {
@@ -294,8 +422,12 @@ input:focus, textarea:focus, select:focus {
 
 /* Custom minimal scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 ::-webkit-scrollbar-track {
@@ -305,6 +437,8 @@ input:focus, textarea:focus, select:focus {
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
   border-radius: var(--radius-full);
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {

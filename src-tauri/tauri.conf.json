@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "shelf",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "identifier": "com.shelf.reader",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -12,12 +12,14 @@
   "app": {
     "windows": [
       {
-        "title": "Shelf - PDF Reader",
-        "width": 1100,
-        "height": 750,
-        "minWidth": 420,
-        "minHeight": 380,
-        "zoomHotkeysEnabled": false
+        "title": "Shelf",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 480,
+        "minHeight": 420,
+        "zoomHotkeysEnabled": false,
+        "center": true,
+        "dragDropEnabled": true
       }
     ],
     "security": {
@@ -26,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm"],
+    "targets": "all",
     "icon": [
       "icons/32x32.png",
       "icons/64x64.png",
@@ -41,12 +43,30 @@
     "longDescription": "Shelf is a minimal, memory-first PDF reader with AI lookup, annotations, and vocabulary memory.",
     "fileAssociations": [
       {
-        "ext": ["pdf"],
+        "ext": [
+          "pdf"
+        ],
         "name": "PDF document",
         "description": "Adobe Portable Document Format",
         "mimeType": "application/pdf",
         "role": "Viewer"
       }
-    ]
+    ],
+    "publisher": "Bittu-the-coder",
+    "copyright": "MIT License",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
   }
 }

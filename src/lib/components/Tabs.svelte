@@ -1,9 +1,6 @@
 <script lang="ts">
   import { appState } from "../stores/appState.svelte";
-
-  function handleTabClick(bookId: number) {
-    appState.openBook(bookId);
-  }
+  import Icon from "./Icon.svelte";
 
   function handleCloseTab(e: MouseEvent, bookId: number) {
     e.stopPropagation();
@@ -11,7 +8,7 @@
   }
 
   function handleAuxClick(e: MouseEvent, bookId: number) {
-    if (e.button === 1) { // Middle click
+    if (e.button === 1) {
       e.preventDefault();
       appState.closeTab(bookId);
     }
@@ -20,37 +17,29 @@
 
 {#if appState.openTabs.length > 0}
   <div class="tabs-container">
-    <button
-      class="shelf-btn"
-      onclick={() => appState.goToShelf()}
-      title="Back to Shelf"
-    >
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/>
-        <path d="M6 6h10"/>
-        <path d="M6 10h10"/>
-      </svg>
-      <span>Shelf</span>
+    <button class="shelf-btn" onclick={() => appState.goToShelf()} title="Back to library">
+      <Icon name="library" size={16} />
+      <span>Library</span>
     </button>
 
-    <div class="tabs-list">
+    <div class="tabs-list" role="tablist">
       {#each appState.openTabs as tab (tab.book.id)}
+        {@const active = appState.activeBook?.id === tab.book.id}
         <div
-          class="tab {appState.activeBook?.id === tab.book.id ? 'active' : ''}"
-          role="button"
+          class="tab"
+          class:active
+          role="tab"
+          aria-selected={active}
           tabindex="0"
-          onclick={() => handleTabClick(tab.book.id)}
-          onkeydown={(e) => e.key === 'Enter' && handleTabClick(tab.book.id)}
+          onclick={() => appState.openBook(tab.book.id)}
+          onkeydown={(e) => (e.key === "Enter" || e.key === " ") && appState.openBook(tab.book.id)}
           onauxclick={(e) => handleAuxClick(e, tab.book.id)}
-          title="{tab.book.title} (Page {tab.currentPage})"
+          title={tab.book.title}
         >
+          <Icon name="file-text" size={14} />
           <span class="tab-title">{tab.book.title}</span>
-          <button
-            class="tab-close"
-            onclick={(e) => handleCloseTab(e, tab.book.id)}
-            title="Close tab (Middle click)"
-          >
-            ×
+          <button class="tab-close" onclick={(e) => handleCloseTab(e, tab.book.id)} title="Close tab (middle-click)" aria-label="Close {tab.book.title}">
+            <Icon name="x" size={13} />
           </button>
         </div>
       {/each}
@@ -61,57 +50,61 @@
 <style>
   .tabs-container {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 34px;
-    min-height: 34px;
+    align-items: flex-end;
+    gap: 6px;
+    height: var(--tabs-height);
+    min-height: var(--tabs-height);
     flex-shrink: 0;
-    padding: 0 12px;
-    background: var(--bg-surface);
+    padding: 0 8px;
+    background: var(--bg-primary);
     border-bottom: 1px solid var(--border-subtle);
-    user-select: none;
-    overflow-x: auto;
-    position: relative;
-    z-index: 85;
   }
 
   .shelf-btn {
-    padding: 4px 10px;
-    height: 26px;
+    height: 28px;
+    margin-bottom: 4px;
+    padding: 0 10px;
+    font-size: 12.5px;
     font-weight: 500;
     color: var(--text-secondary);
-    background: var(--bg-hover);
-    border-radius: var(--radius-sm);
     flex-shrink: 0;
   }
 
   .shelf-btn:hover {
+    background: var(--bg-hover);
     color: var(--text-primary);
-    background: var(--bg-active);
   }
 
   .tabs-list {
     display: flex;
-    align-items: center;
-    gap: 4px;
+    align-items: flex-end;
+    gap: 2px;
     flex: 1;
+    min-width: 0;
+    height: 100%;
     overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .tabs-list::-webkit-scrollbar {
+    display: none;
   }
 
   .tab {
     display: flex;
     align-items: center;
-    gap: 6px;
-    height: 26px;
-    max-width: 220px;
-    padding: 0 8px 0 12px;
-    background: transparent;
+    gap: 8px;
+    height: 30px;
+    flex: 0 1 220px;
+    min-width: 110px;
+    padding: 0 6px 0 12px;
+    font-size: 12.5px;
     color: var(--text-secondary);
-    border-radius: var(--radius-sm);
-    font-size: 12px;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
     cursor: pointer;
+    position: relative;
     transition: background var(--transition-fast), color var(--transition-fast);
-    flex-shrink: 0;
   }
 
   .tab:hover {
@@ -120,44 +113,62 @@
   }
 
   .tab.active {
-    background: var(--bg-active);
+    background: var(--bg-surface);
     color: var(--text-primary);
     font-weight: 500;
+    box-shadow: 0 -1px 0 var(--border-subtle) inset, 1px 0 0 var(--border-subtle), -1px 0 0 var(--border-subtle);
+  }
+
+  .tab.active::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 1px;
+    background: var(--bg-surface);
   }
 
   .tab-title {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .tab-close {
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    font-size: 14px;
-    line-height: 1;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
     color: var(--text-muted);
     opacity: 0;
-    transition: opacity var(--transition-fast), background var(--transition-fast);
+    border-radius: var(--radius-xs);
   }
 
+  .tab.active .tab-close,
   .tab:hover .tab-close,
-  .tab.active .tab-close {
+  .tab:focus-within .tab-close {
     opacity: 1;
   }
 
   .tab-close:hover {
-    background: var(--bg-hover);
+    background: var(--bg-active);
     color: var(--text-primary);
   }
 
-  @media (max-width: 600px) {
+  @media (hover: none) {
+    .tab-close {
+      opacity: 1;
+    }
+  }
+
+  @media (max-width: 560px) {
     .shelf-btn span {
       display: none;
     }
     .tab {
-      max-width: 140px;
+      min-width: 90px;
     }
   }
 </style>

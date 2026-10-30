@@ -7,6 +7,7 @@ mod books;
 mod chapters;
 mod highlights;
 mod notes;
+mod reading;
 mod settings;
 mod shelves;
 mod words;
@@ -15,6 +16,7 @@ pub use books::*;
 pub use chapters::*;
 pub use highlights::*;
 pub use notes::*;
+pub use reading::*;
 pub use shelves::*;
 pub use words::*;
 
@@ -68,6 +70,15 @@ impl Database {
         if !already_applied {
             conn.execute_batch(migration_sql)?;
             conn.execute("INSERT INTO _migrations (name) VALUES (?1)", ["0001_init"])?;
+        }
+
+        let reading_applied: bool = conn
+            .prepare("SELECT COUNT(*) FROM _migrations WHERE name = ?1")?
+            .query_row(["0002_reading"], |row| row.get::<_, i64>(0))
+            .map(|count| count > 0)?;
+        if !reading_applied {
+            conn.execute_batch(include_str!("../../migrations/0002_reading.sql"))?;
+            conn.execute("INSERT INTO _migrations (name) VALUES (?1)", ["0002_reading"])?;
         }
 
         // Auto-migrate words table to ensure meaning_hindi column exists

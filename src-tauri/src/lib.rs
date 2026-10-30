@@ -57,10 +57,13 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .expect("failed to get app data dir");
+            secrets::init_fallback_dir(app_dir.clone());
             let db_path = app_dir.join("shelf.db");
             tracing::info!("Initializing SQLite database at: {:?}", db_path);
             let database = db::Database::open(&db_path).expect("failed to initialize database");
             app.manage(database);
+            #[cfg(target_os = "linux")]
+            route_touchpad_pinch(app);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -102,6 +105,15 @@ pub fn run() {
             commands::highlights::list_highlights,
             commands::highlights::delete_highlight,
             commands::highlights::update_highlight_color,
+            // Bookmarks, review & reading time
+            commands::reading::list_bookmarks,
+            commands::reading::add_bookmark,
+            commands::reading::delete_bookmark,
+            commands::reading::list_due_cards,
+            commands::reading::count_due_cards,
+            commands::reading::review_card,
+            commands::reading::log_reading,
+            commands::reading::reading_stats,
             // Settings
             commands::settings::set_api_key,
             commands::settings::has_api_key,
@@ -118,4 +130,36 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// WebKitGTK turns a touchpad pinch into zoom of the whole web view, which
+/// scales the entire app UI. Swallow the gesture before WebKit sees it and
+/// forward it to the frontend, which zooms only the PDF.
+/// Payload: (phase, scale) with phase 0 = begin, 1 = update, 2 = end, 3 = cancel
+/// and `scale` relative to the start of the gesture.
+#[cfg(target_os = "linux")]
+fn route_touchpad_pinch(app: &tauri::App) {
+    use gtk::gdk;
+    use gtk::glib;
+    use gtk::prelude::*;
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let handle = app.handle().clone();
+    let result = window.with_webview(move |platform| {
+        platform.inner().connect_event(move |_, event| {
+            if event.event_type() != gdk::EventType::TouchpadPinch {
+                return glib::Propagation::Proceed;
+            }
+            if let Some(pinch) = event.downcast_ref::<gdk::EventTouchpadPinch>() {
+                let raw = pinch.as_ref();
+                let _ = handle.emit("touchpad-pinch", (raw.phase as i32, raw.scale));
+            }
+            glib::Propagation::Stop
+        });
+    });
+    if let Err(e) = result {
+        tracing::warn!("Could not hook touchpad pinch: {e}");
+    }
 }

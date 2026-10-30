@@ -1,82 +1,66 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import { appState } from "../stores/appState.svelte";
   import { api, type BookSummary } from "../api";
-  import { PDFViewer } from "../pdf/pdfViewer";
-  import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+  import { open as openFileDialog, ask } from "@tauri-apps/plugin-dialog";
+  import Icon from "./Icon.svelte";
 
   let isDraggingOver = $state(false);
-  let isAddingBook = $state(false);
-  let addingStatus = $state("Opening PDF...");
   let searchQuery = $state("");
   let newShelfModal = $state(false);
   let newShelfName = $state("");
   let fileInputEl: HTMLInputElement;
-  let bookCoverUrls = $state<Map<number, string>>(new Map());
+  const bookCoverUrls = new SvelteMap<number, string>();
   let unlistenDragDrop: (() => void) | null = null;
+  let viewportWidth = $state(1200);
 
   onMount(() => {
     appState.refreshLibrary();
+    appState.refreshDueCount();
 
-    // Hook native Tauri window drag-and-drop for true absolute paths
+    // Native drag & drop gives real file paths (works on Windows, Linux and macOS)
     import("@tauri-apps/api/webview")
-      .then(({ getCurrentWebview }) => {
-        getCurrentWebview()
-          .onDragDropEvent((event) => {
-            if (event.payload.type === "over") {
-              isDraggingOver = true;
-            } else if (event.payload.type === "drop") {
-              isDraggingOver = false;
-              const paths = event.payload.paths;
-              if (paths && paths.length > 0) {
-                for (const p of paths) {
-                  if (p.toLowerCase().endsWith(".pdf")) {
-                    processPdfFromPath(p);
-                    break;
-                  }
-                }
-              }
-            } else {
-              isDraggingOver = false;
-            }
-          })
-          .then((unlisten) => {
-            unlistenDragDrop = unlisten;
-          })
-          .catch((e) => {
-            console.warn("Tauri drag-drop listener error:", e);
-          });
+      .then(({ getCurrentWebview }) =>
+        getCurrentWebview().onDragDropEvent((event) => {
+          if (appState.currentView !== "shelf") return;
+          if (event.payload.type === "over" || event.payload.type === "enter") {
+            isDraggingOver = true;
+          } else if (event.payload.type === "drop") {
+            isDraggingOver = false;
+            const pdf = event.payload.paths?.find((p) => p.toLowerCase().endsWith(".pdf"));
+            if (pdf) appState.openPdfFilePath(pdf);
+            else if (event.payload.paths?.length) appState.showToast("Only PDF files can be added.", "error");
+          } else {
+            isDraggingOver = false;
+          }
+        })
+      )
+      .then((unlisten) => {
+        unlistenDragDrop = unlisten;
       })
-      .catch((e) => {
-        console.warn("Could not import Tauri webview module:", e);
-      });
+      .catch((e) => console.warn("Drag & drop unavailable:", e));
   });
 
   onDestroy(() => {
     unlistenDragDrop?.();
-    // Revoke object URLs to avoid memory leaks
-    for (const url of bookCoverUrls.values()) {
-      URL.revokeObjectURL(url);
-    }
+    for (const url of bookCoverUrls.values()) URL.revokeObjectURL(url);
   });
 
-  // Fetch covers from SQLite for books that have them
+  // Load stored covers for books we haven't seen yet
   $effect(() => {
-    const books = appState.books;
-    for (const b of books) {
-      if (!bookCoverUrls.has(b.id)) {
-        api.getBookCover(b.id).then((coverBytes) => {
-          if (coverBytes && coverBytes.length > 0) {
-            const blob = new Blob([new Uint8Array(coverBytes)], { type: "image/png" });
-            const url = URL.createObjectURL(blob);
-            bookCoverUrls.set(b.id, url);
-          }
-        }).catch(() => {});
-      }
+    for (const b of appState.books) {
+      if (bookCoverUrls.has(b.id)) continue;
+      bookCoverUrls.set(b.id, "");
+      api
+        .getBookCover(b.id)
+        .then((bytes) => {
+          if (bytes) bookCoverUrls.set(b.id, URL.createObjectURL(new Blob([bytes as BlobPart], { type: "image/png" })));
+        })
+        .catch(() => {});
     }
   });
 
-  // Color generator for 3D book covers
   const coverStyles = [
     { bg: "linear-gradient(135deg, #7f1d1d 0%, #450a0a 100%)", accent: "#fbbf24", spine: "#581c1c", ribbon: "#ef4444" },
     { bg: "linear-gradient(135deg, #064e3b 0%, #022c22 100%)", accent: "#34d399", spine: "#06382a", ribbon: "#10b981" },
@@ -94,107 +78,40 @@
     return coverStyles[Math.abs(hash) % coverStyles.length];
   }
 
-  // Primary action: Native File Picker
+  function progressOf(book: BookSummary) {
+    if (!book.page_count || book.page_count <= 1) return 0;
+    return Math.min(1, Math.max(0, (book.last_page - 1) / (book.page_count - 1)));
+  }
+
   async function handleOpenPdfClick() {
     try {
       const selected = await openFileDialog({
         multiple: false,
         filters: [{ name: "PDF Documents", extensions: ["pdf"] }],
       });
-      if (selected && typeof selected === "string") {
-        await processPdfFromPath(selected);
-        return;
-      }
+      if (selected && typeof selected === "string") await appState.openPdfFilePath(selected);
+      return;
     } catch (err) {
-      console.warn("Tauri openFileDialog fallback:", err);
+      console.warn("Native file dialog unavailable, using browser picker:", err);
     }
-    // Fallback to web input
     fileInputEl?.click();
   }
 
+  // Browser fallback: we only get the bytes, so keep a copy in the app data folder
   async function handleFileSelect(e: Event) {
     const input = e.target as HTMLInputElement;
-    if (!input.files || input.files.length === 0) return;
-    const file = input.files[0];
-    await processPdfFile(file);
+    const file = input.files?.[0];
     input.value = "";
-  }
-
-  async function handleDrop(e: DragEvent) {
-    e.preventDefault();
-    isDraggingOver = false;
-    if (!e.dataTransfer?.files || e.dataTransfer.files.length === 0) return;
-    const file = e.dataTransfer.files[0];
-    if (file.name.toLowerCase().endsWith(".pdf")) {
-      await processPdfFile(file);
-    }
-  }
-
-  // Unified PDF processing logic ensuring pristine master bytes
-  async function processPdfFromBytesAndPath(masterBytes: Uint8Array, filePath: string, defaultTitle: string) {
-    addingStatus = "Parsing PDF chapters & thumbnail...";
-    const viewer = new PDFViewer();
-
-    // ALWAYS pass a clone (.slice()) so masterBytes is never neutered by PDF.js worker transfer!
-    const pageCount = await viewer.load(masterBytes.slice());
-    const coverPng = await viewer.generateCoverPng();
-    const outline = await viewer.extractOutline();
-
-    addingStatus = "Saving to library...";
-    const book = await api.addBook({
-      path: filePath,
-      shelfId: appState.activeShelfId,
-      title: defaultTitle,
-      pageCount,
-      coverPng,
-    });
-
-    if (outline.length > 0) {
-      await api.importOutline(book.id, outline);
-    }
-
-    // Cache pristine master bytes
-    appState.docBufferCache.set(book.id, masterBytes);
-    await appState.refreshLibrary();
-    await appState.openBook(book.id);
-  }
-
-  async function processPdfFromPath(filePath: string) {
-    isAddingBook = true;
-    addingStatus = "Reading PDF file...";
+    if (!file) return;
     try {
-      const bytes = await api.readPdfBytes(filePath);
-      const masterBytes = new Uint8Array(bytes);
-      const fileName = filePath.split(/[/\\]/).pop()?.replace(/\.pdf$/i, "") || "Untitled Book";
-      await processPdfFromBytesAndPath(masterBytes, filePath, fileName);
+      appState.importStatus = "Reading PDF…";
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const path = await api.saveImportedPdf(file.name, Array.from(bytes));
+      await appState.importPdfBytes(bytes, path, file.name.replace(/\.pdf$/i, ""));
     } catch (err: any) {
-      console.error("Failed to open PDF from path:", err);
-      alert(`Could not load PDF: ${err?.message || err}`);
+      appState.showToast(`Could not open PDF: ${err?.message || err}`, "error");
     } finally {
-      isAddingBook = false;
-    }
-  }
-
-  async function processPdfFile(file: File) {
-    isAddingBook = true;
-    addingStatus = "Reading PDF data...";
-    try {
-      const buffer = await file.arrayBuffer();
-      const masterBytes = new Uint8Array(buffer);
-
-      let filePath = (file as any).path;
-      if (!filePath) {
-        addingStatus = "Saving imported PDF...";
-        filePath = await api.saveImportedPdf(file.name, Array.from(masterBytes));
-      }
-
-      const title = file.name.replace(/\.pdf$/i, "");
-      await processPdfFromBytesAndPath(masterBytes, filePath, title);
-    } catch (err: any) {
-      console.error("Failed to process dropped PDF:", err);
-      alert(`Could not load PDF: ${err?.message || err}`);
-    } finally {
-      isAddingBook = false;
+      appState.importStatus = null;
     }
   }
 
@@ -206,36 +123,65 @@
       newShelfModal = false;
       newShelfName = "";
     } catch (err) {
+      appState.showToast("Could not create the shelf.", "error");
       console.error("Failed to create shelf:", err);
     }
   }
 
-  async function handleDeleteBook(e: MouseEvent, bookId: number) {
-    e.stopPropagation();
-    if (confirm("Delete this book and its saved vocabulary & notes?")) {
-      await api.deleteBook(bookId);
-      await appState.refreshLibrary();
+  async function confirmAction(message: string, title: string) {
+    try {
+      return await ask(message, { title, kind: "warning", okLabel: "Remove", cancelLabel: "Cancel" });
+    } catch {
+      return confirm(message);
     }
   }
 
-  // Filter books by search query
+  async function handleDeleteBook(e: MouseEvent, book: BookSummary) {
+    e.stopPropagation();
+    const ok = await confirmAction(
+      `Remove “${book.title}” from your library? Its saved words, notes and highlights will be deleted. The PDF file itself is not touched.`,
+      "Remove book"
+    );
+    if (!ok) return;
+    await api.deleteBook(book.id);
+    appState.closeTab(book.id);
+    await appState.refreshLibrary();
+  }
+
   let filteredBooks = $derived.by(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return appState.books;
-    return appState.books.filter((b) =>
-      b.title.toLowerCase().includes(q) || (b.author && b.author.toLowerCase().includes(q))
+    return appState.books.filter(
+      (b) => b.title.toLowerCase().includes(q) || (b.author && b.author.toLowerCase().includes(q))
     );
   });
 
-  // Chunk books into groups of 4 for 3D wooden shelf rows
+  // Books per shelf row follow the window width (must match the CSS sizes below)
+  let perRow = $derived.by(() => {
+    const narrow = viewportWidth < 900;
+    const viewportPad = narrow ? 16 : 56;
+    const trackPad = narrow ? 12 : 40;
+    const gap = narrow ? 32 : 48;
+    const bookWidth = 190 + 34; // cover + 3D spine/pages depth
+    const available = viewportWidth - viewportPad * 2 - trackPad * 2;
+    return Math.max(1, Math.min(6, Math.floor((available + gap) / (bookWidth + gap))));
+  });
+
   let shelfRows = $derived.by(() => {
     const rows: BookSummary[][] = [];
-    const books = filteredBooks;
-    const chunkSize = 4;
-    for (let i = 0; i < books.length; i += chunkSize) {
-      rows.push(books.slice(i, i + chunkSize));
+    for (let i = 0; i < filteredBooks.length; i += perRow) {
+      rows.push(filteredBooks.slice(i, i + perRow));
     }
     return rows;
+  });
+
+  // The book to resume: most recently opened one that isn't finished
+  let continueBook = $derived.by(() => {
+    if (searchQuery.trim()) return null;
+    const opened = appState.books
+      .filter((b) => b.last_opened_at && (!b.page_count || b.last_page < b.page_count))
+      .sort((a, b) => (b.last_opened_at ?? "").localeCompare(a.last_opened_at ?? ""));
+    return opened[0] ?? null;
   });
 
   const shelfRomanNumerals = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
@@ -243,9 +189,8 @@
 
 <div
   class="shelf-container {isDraggingOver ? 'dragging' : ''}"
-  ondragover={(e) => { e.preventDefault(); isDraggingOver = true; }}
-  ondragleave={() => (isDraggingOver = false)}
-  ondrop={handleDrop}
+  ondragover={(e) => e.preventDefault()}
+  ondrop={(e) => e.preventDefault()}
   role="region"
   aria-label="3D Library Shelf"
 >
@@ -257,7 +202,7 @@
       </div>
       <div class="brand-text">
         <span class="brand-title">Shelf</span>
-        <span class="brand-subtitle">Private 3D Library</span>
+        <span class="brand-subtitle">{appState.books.length} {appState.books.length === 1 ? "book" : "books"}</span>
       </div>
     </div>
 
@@ -267,7 +212,7 @@
         class="shelf-tab {appState.activeShelfId === null ? 'active' : ''}"
         onclick={() => appState.selectShelf(null)}
       >
-        All Volumes ({appState.books.length})
+        All books
       </button>
       {#each appState.shelves as s (s.id)}
         <button
@@ -277,20 +222,17 @@
           {s.name}
         </button>
       {/each}
-      <button class="add-shelf-btn" onclick={() => (newShelfModal = true)} title="Create New Shelf">
-        +
+      <button class="add-shelf-btn" onclick={() => (newShelfModal = true)} title="New shelf" aria-label="New shelf">
+        <Icon name="plus" size={14} />
       </button>
     </div>
 
     <!-- Search in Collection -->
     <div class="search-box">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="11" cy="11" r="8"/>
-        <path d="m21 21-4.3-4.3"/>
-      </svg>
+      <Icon name="search" size={15} />
       <input
         type="text"
-        placeholder="Search library..."
+        placeholder="Search library…"
         bind:value={searchQuery}
         class="search-input"
       />
@@ -304,44 +246,31 @@
           onclick={() => (appState.shelfViewMode = "3d")}
           title="3D Bookshelf View"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="m21 16-9 5-9-5V8l9-5 9 5v8Z"/>
-            <path d="m3.27 6.96 8.73 4.85 8.73-4.85"/>
-            <path d="M12 22.08V12"/>
-          </svg>
-          <span>3D Library</span>
+          <Icon name="shelf" size={16} />
+          <span>Shelf</span>
         </button>
         <button
           class="toggle-btn {appState.shelfViewMode === 'grid' ? 'active' : ''}"
           onclick={() => (appState.shelfViewMode = "grid")}
           title="Flat Grid View"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect width="7" height="7" x="3" y="3" rx="1"/>
-            <rect width="7" height="7" x="14" y="3" rx="1"/>
-            <rect width="7" height="7" x="14" y="14" rx="1"/>
-            <rect width="7" height="7" x="3" y="14" rx="1"/>
-          </svg>
+          <Icon name="grid" size={15} />
           <span>Grid</span>
         </button>
       </div>
 
       <button class="btn-primary open-file-btn" onclick={handleOpenPdfClick}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 5v14"/><path d="M5 12h14"/>
-        </svg>
+        <Icon name="file-plus" size={16} />
         <span>Open PDF</span>
       </button>
 
       <button
         class="icon-btn-settings"
         onclick={() => (appState.settingsModalOpen = true)}
-        title="Settings & Gemini API Key"
+        title="Settings & AI provider"
+        aria-label="Settings"
       >
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
-          <circle cx="12" cy="12" r="3"/>
-        </svg>
+        <Icon name="settings" size={17} />
       </button>
 
       <!-- Hidden file input for web fallback -->
@@ -356,13 +285,37 @@
   </header>
 
   <!-- Library Showcase Area -->
-  <main class="library-viewport">
-    {#if isAddingBook}
-      <div class="loading-state">
-        <div class="spinner"></div>
-        <span>{addingStatus}</span>
+  <main class="library-viewport" bind:clientWidth={viewportWidth}>
+    {#if continueBook || appState.dueCount > 0}
+      <div class="home-strip">
+        {#if continueBook}
+          {@const style = getCoverStyle(continueBook.title)}
+          <button class="continue-card" onclick={() => continueBook && appState.openBook(continueBook.id)}>
+            <div class="continue-cover" style="background: {style.bg};">
+              {#if bookCoverUrls.get(continueBook.id)}<img src={bookCoverUrls.get(continueBook.id)} alt="" />{/if}
+            </div>
+            <div class="continue-info">
+              <span class="eyebrow">Continue reading</span>
+              <span class="continue-title">{continueBook.title}</span>
+              <div class="continue-progress"><div style="width: {progressOf(continueBook) * 100}%"></div></div>
+              <span class="continue-meta">
+                Page {continueBook.last_page}{#if continueBook.page_count} of {continueBook.page_count} · {Math.round(progressOf(continueBook) * 100)}%{/if}
+              </span>
+            </div>
+            <span class="resume">Resume <Icon name="chevron-right" size={15} /></span>
+          </button>
+        {/if}
+        {#if appState.dueCount > 0}
+          <button class="review-card" onclick={() => (appState.reviewOpen = true)}>
+            <Icon name="sparkles" size={20} />
+            <span class="eyebrow">Word review</span>
+            <span class="review-count">{appState.dueCount}</span>
+            <span class="continue-meta">{appState.dueCount === 1 ? "word" : "words"} due</span>
+          </button>
+        {/if}
       </div>
-    {:else if filteredBooks.length === 0}
+    {/if}
+    {#if filteredBooks.length === 0}
       <div class="empty-shelf">
         <div class="empty-bookcase-illustration">
           <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
@@ -372,15 +325,21 @@
           </svg>
         </div>
         {#if searchQuery.trim()}
-          <h2>No matching books found</h2>
-          <p>No titles or authors match "{searchQuery}". Clear your search to see all shelved books.</p>
-          <button class="btn-ghost" onclick={() => (searchQuery = "")}>Clear Search</button>
+          <h2>No matches</h2>
+          <p>Nothing in this collection matches “{searchQuery}”.</p>
+          <button class="btn-ghost" onclick={() => (searchQuery = "")}>Clear search</button>
+        {:else if appState.activeShelfId !== null}
+          <h2>This shelf is empty</h2>
+          <p>Books you open while this shelf is selected are added to it.</p>
+          <button class="btn-primary" onclick={handleOpenPdfClick}>Open a PDF</button>
         {:else}
-          <h2>Your 3D Library is Empty</h2>
-          <p>Click "Open PDF" or drag and drop any PDF file onto the library shelves to start reading with memory.</p>
-          <button class="btn-primary" onclick={handleOpenPdfClick}>
-            Choose a PDF from your computer
+          <h2>Start your library</h2>
+          <p>Open a PDF or drop one here. Select any word while reading to see what it means, right on the page.</p>
+          <button class="btn-primary big" onclick={handleOpenPdfClick}>
+            <Icon name="file-plus" size={17} />
+            Open a PDF
           </button>
+          <span class="empty-hint">or press <kbd>Ctrl</kbd> + <kbd>O</kbd></span>
         {/if}
       </div>
     {:else if appState.shelfViewMode === "3d"}
@@ -398,13 +357,15 @@
                   onclick={() => appState.openBook(book.id)}
                   role="button"
                   tabindex="0"
+                  aria-label="Open {book.title}"
+                  title={book.title}
                   onkeydown={(e) => e.key === "Enter" && appState.openBook(book.id)}
                 >
                   <!-- 3D Book Container -->
                   <div class="book-3d" style="--book-cover: {style.bg}; --book-accent: {style.accent}; --book-spine: {style.spine}; --book-ribbon: {style.ribbon};">
                     <!-- Front Cover -->
                     <div class="book-face book-front">
-                      {#if bookCoverUrls.has(book.id)}
+                      {#if bookCoverUrls.get(book.id)}
                         <img src={bookCoverUrls.get(book.id)} alt={book.title} class="cover-image" />
                         <div class="cover-overlay">
                           <div class="cover-header">
@@ -473,10 +434,11 @@
                   <!-- Quick Delete Action -->
                   <button
                     class="book-delete-btn"
-                    onclick={(e) => handleDeleteBook(e, book.id)}
-                    title="Remove from Shelf"
+                    onclick={(e) => handleDeleteBook(e, book)}
+                    title="Remove from library"
+                    aria-label="Remove {book.title} from library"
                   >
-                    ×
+                    <Icon name="trash" size={13} />
                   </button>
                 </div>
               {/each}
@@ -510,22 +472,27 @@
             role="button"
             tabindex="0"
             onkeydown={(e) => e.key === "Enter" && appState.openBook(book.id)}
+            aria-label="Open {book.title}"
           >
             <div class="flat-cover" style="background: {style.bg};">
-              {#if bookCoverUrls.has(book.id)}
+              {#if bookCoverUrls.get(book.id)}
                 <img src={bookCoverUrls.get(book.id)} alt={book.title} class="flat-cover-img" />
+              {:else}
+                <h3 class="flat-title">{book.title}</h3>
               {/if}
-              <h3 class="flat-title">{book.title}</h3>
               <button
                 class="book-delete-btn"
-                onclick={(e) => handleDeleteBook(e, book.id)}
-                title="Remove from Shelf"
+                onclick={(e) => handleDeleteBook(e, book)}
+                title="Remove from library"
+                aria-label="Remove {book.title} from library"
               >
-                ×
+                <Icon name="trash" size={13} />
               </button>
             </div>
+            <div class="flat-progress"><div style="width: {progressOf(book) * 100}%"></div></div>
             <div class="flat-meta">
-              <span class="flat-page">Page {book.last_page} of {book.page_count || "?"}</span>
+              <span class="flat-title-meta" title={book.title}>{book.title}</span>
+              <span class="flat-page">p. {book.last_page}{#if book.page_count} / {book.page_count}{/if}</span>
               {#if book.word_count > 0}
                 <span class="badge-v">{book.word_count} words</span>
               {/if}
@@ -616,15 +583,11 @@
   }
 
   .logo-mark {
-    width: 36px;
-    height: 36px;
-    background: linear-gradient(135deg, #d97706 0%, #92400e 100%);
-    color: #ffffff;
+    width: 40px;
+    height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--radius-sm);
-    box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3);
   }
 
   .brand-title {
@@ -782,7 +745,7 @@
   .library-viewport {
     flex: 1;
     overflow-y: auto;
-    padding: 40px 60px 80px;
+    padding: 40px 56px 80px;
     perspective: 1400px;
     position: relative;
   }
@@ -1100,6 +1063,17 @@
     transition: opacity 150ms ease, transform 150ms ease;
   }
 
+  .book-3d-wrapper:focus-within .book-delete-btn,
+  .flat-card:focus-within .book-delete-btn {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .book-delete-btn {
+      opacity: 0.85;
+    }
+  }
+
   .book-3d-wrapper:hover .book-delete-btn,
   .flat-card:hover .book-delete-btn {
     opacity: 1;
@@ -1241,12 +1215,62 @@
   }
 
   .flat-meta {
-    padding: 10px 14px;
+    padding: 8px 12px 10px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 11px;
+    gap: 8px;
+    font-size: 11.5px;
     color: rgba(255, 255, 255, 0.6);
+  }
+
+  .flat-title-meta {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.88);
+    font-weight: 500;
+    font-size: 12.5px;
+  }
+
+  .flat-page {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .flat-progress {
+    height: 3px;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .flat-progress div {
+    height: 100%;
+    background: #f59e0b;
+  }
+
+  .btn-primary.big {
+    height: 42px;
+    padding: 0 22px;
+    font-size: 14px;
+    gap: 8px;
+  }
+
+  .empty-hint {
+    display: block;
+    margin-top: 14px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  kbd {
+    font-family: inherit;
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.7);
   }
 
   .badge-v {
@@ -1290,17 +1314,6 @@
     margin-bottom: 24px;
   }
 
-  .loading-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 350px;
-    gap: 16px;
-    color: #fbbf24;
-    font-size: 14px;
-    font-weight: 500;
-  }
 
   .modal-backdrop {
     position: fixed;
@@ -1352,15 +1365,147 @@
   }
 
   .shelf-brand-logo {
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
-    object-fit: cover;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    width: 40px;
+    height: 40px;
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
   }
 
-  /* Responsive Shelf Rules */
+  /* Home strip: continue reading + review */
+  .home-strip {
+    display: flex;
+    gap: 16px;
+    max-width: 1200px;
+    margin: 0 auto 40px;
+    flex-wrap: wrap;
+  }
+
+  .continue-card,
+  .review-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 18px 14px 14px;
+    text-align: left;
+    color: #f5efe6;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+  }
+
+  .continue-card {
+    flex: 1 1 420px;
+    min-width: 0;
+  }
+
+  .continue-card:hover,
+  .review-card:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(245, 158, 11, 0.4);
+    transform: translateY(-1px);
+  }
+
+  .continue-cover {
+    width: 54px;
+    height: 76px;
+    flex-shrink: 0;
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  }
+
+  .continue-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .continue-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .eyebrow {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #f59e0b;
+  }
+
+  .continue-title {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 17px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .continue-progress {
+    height: 4px;
+    max-width: 320px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.1);
+    overflow: hidden;
+  }
+
+  .continue-progress div {
+    height: 100%;
+    background: #f59e0b;
+  }
+
+  .continue-meta {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .resume {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #f59e0b;
+  }
+
+  .review-card {
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 2px;
+    padding: 14px 22px;
+  }
+
+  .review-card :global(svg) {
+    color: #f59e0b;
+    margin-bottom: 4px;
+  }
+
+  .review-count {
+    font-size: 26px;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  /* Responsive Shelf Rules (keep in sync with perRow in the script) */
   @media (max-width: 900px) {
+    .library-viewport {
+      padding: 24px 16px 60px;
+    }
+    .books-track {
+      padding: 0 12px;
+      gap: 32px;
+    }
+    .bookshelf-scene {
+      gap: 56px;
+    }
     .shelf-header {
       padding: 10px 16px;
       gap: 10px;

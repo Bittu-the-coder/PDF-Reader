@@ -1,7 +1,12 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { appState } from "../stores/appState.svelte";
   import { api, type WordLookupResult } from "../api";
-  import { ANNOTATION_COLORS, mergeLineRects } from "../pdf/highlights";
+  import { ANNOTATION_COLORS } from "../pdf/highlights";
+  import { formatAiMarkdown } from "../aiFormat";
+  import Icon from "./Icon.svelte";
+
+  type PassageMode = "explain" | "translate" | "summarize";
 
   let isSaving = $state(false);
   let saveFeedback = $state<string | null>(null);
@@ -10,9 +15,10 @@
   let lookupResult = $state<WordLookupResult | null>(null);
   let isLoadingLookup = $state(false);
   let lookupError = $state<string | null>(null);
-  let activeQuery = $state<string>("");
+  let activeQuery = "";
+  let requestToken = 0;
 
-  // In-place Mini AI Chat
+  // Follow-up chat
   interface MiniChatMessage {
     role: "user" | "model";
     text: string;
@@ -21,224 +27,192 @@
   let chatInput = $state("");
   let isChatting = $state(false);
   let showChat = $state(false);
+  let chatThreadEl = $state<HTMLDivElement>();
 
-  // Passage explanation & translation state
-  let passageResult = $state<{ mode: "explain" | "translate" | "summarize"; text: string } | null>(null);
-  let isLoadingPassage = $state(false);
+  // Passage explanation & translation
+  let passageResult = $state<{ mode: PassageMode; text: string } | null>(null);
+  let isLoadingPassage = $state<PassageMode | null>(null);
   let passageError = $state<string | null>(null);
 
-  // Dragging state
+  // Annotation style chosen in the footer
+  let underlineMode = $state(false);
+  let copied = $state(false);
+
+  // Dragging & measuring
   let dragX = $state<number | null>(null);
   let dragY = $state<number | null>(null);
-  let isDragging = $state(false);
+  let cardHeight = $state(320);
 
-  let isPhrase = $derived.by(() => {
-    return appState.selectedText.trim().split(/\s+/).length > 3;
-  });
+  // Lookups are cached for the session so re-selecting a word is instant
+  const lookupCache = new Map<string, WordLookupResult>();
 
-  // Position calculation so it floats near selection without going offscreen
-  let positionStyle = $derived.by(() => {
-    if (dragX !== null && dragY !== null) {
-      return `top: ${Math.round(dragY)}px; left: ${Math.round(dragX)}px;`;
-    }
-    if (!appState.selectionRect) return "display: none;";
-    const r = appState.selectionRect;
-    const cardWidth = Math.min(window.innerWidth - 32, isPhrase ? 400 : 360);
-    const cardHeight = isPhrase ? 450 : (showChat ? 440 : 340);
-
-    let left = r.left + r.width / 2 - cardWidth / 2;
-    if (left < 16) left = 16;
-    if (left + cardWidth > window.innerWidth - 16) {
-      left = window.innerWidth - cardWidth - 16;
-    }
-
-    // Place below selection by default, or above if close to bottom
-    let top = r.top + r.height + 8;
-    if (top + cardHeight > window.innerHeight - 16) {
-      top = Math.max(16, r.top - cardHeight - 8);
-    }
-
-    return `top: ${Math.round(top)}px; left: ${Math.round(left)}px; max-width: calc(100vw - 32px);`;
-  });
-
-  function startDrag(e: MouseEvent) {
-    if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
-    e.preventDefault();
-    isDragging = true;
-    const startMouseX = e.clientX;
-    const startMouseY = e.clientY;
-
-    const cardEl = (e.currentTarget as HTMLElement).closest(".lookup-card") as HTMLElement | null;
-    const rect = cardEl ? cardEl.getBoundingClientRect() : { left: 100, top: 100 };
-    const initialLeft = rect.left;
-    const initialTop = rect.top;
-
-    const handleMouseMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - startMouseX;
-      const dy = ev.clientY - startMouseY;
-      const cardWidth = isPhrase ? 400 : 350;
-      dragX = Math.max(8, Math.min(window.innerWidth - cardWidth - 10, initialLeft + dx));
-      dragY = Math.max(8, Math.min(window.innerHeight - 100, initialTop + dy));
-    };
-
-    const handleMouseUp = () => {
-      isDragging = false;
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-  }
+  const providerName = $derived(appState.aiProvider === "openrouter" ? "OpenRouter" : "Gemini");
+  const wordCount = $derived(appState.selectedText.trim().split(/\s+/).filter(Boolean).length);
+  const isPhrase = $derived(wordCount > 3);
+  const canAnnotate = $derived(appState.selectionNormalizedRects.length > 0);
+  const sheet = $derived(appState.isCompact);
 
   let isWordSaved = $derived.by(() => {
     const text = appState.selectedText.trim().toLowerCase();
     return appState.words.some((w) => w.word.toLowerCase() === text);
   });
 
-  function formatAiMarkdown(text: string): string {
-    if (!text) return "";
-    let escaped = text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-
-    // Bold: **text** or __text__
-    escaped = escaped.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-    escaped = escaped.replace(/__(.*?)__/g, "<strong>$1</strong>");
-
-    // Inline code: `code`
-    escaped = escaped.replace(/`([^`]+)`/g, "<code>$1</code>");
-
-    // Italics: *text* (excluding already matched strong)
-    escaped = escaped.replace(/(^|[^\*])\*([^\*]+)\*([^\*]|$)/g, "$1<em>$2</em>$3");
-
-    // Convert bullet asterisks and newlines
-    const rawLines = escaped.split("\n");
-    const processedLines: string[] = [];
-    let inList = false;
-
-    for (let rawLine of rawLines) {
-      let line = rawLine.trim();
-      if (!line) {
-        if (inList) {
-          processedLines.push("</ul>");
-          inList = false;
-        }
-        processedLines.push("<div class='ai-spacer'></div>");
-        continue;
-      }
-
-      // Check if line contains inline bullet delimiters like " * " or "•"
-      if (line.includes(" * ")) {
-        const parts = line.split(/\s\*\s/);
-        for (let i = 0; i < parts.length; i++) {
-          const part = parts[i].trim();
-          if (!part) continue;
-          if (i === 0 && !line.startsWith("* ")) {
-            if (inList) {
-              processedLines.push("</ul>");
-              inList = false;
-            }
-            processedLines.push(`<p class="ai-p">${part}</p>`);
-          } else {
-            if (!inList) {
-              processedLines.push("<ul class='ai-list'>");
-              inList = true;
-            }
-            processedLines.push(`<li>${part}</li>`);
-          }
-        }
-        continue;
-      }
-
-      if (line.startsWith("* ") || line.startsWith("- ") || line.startsWith("• ")) {
-        if (!inList) {
-          processedLines.push("<ul class='ai-list'>");
-          inList = true;
-        }
-        const content = line.replace(/^[\*\-•]\s+/, "");
-        processedLines.push(`<li>${content}</li>`);
-        continue;
-      }
-
-      // Numbered list items
-      const numMatch = line.match(/^(\d+)\.\s+(.*)/);
-      if (numMatch) {
-        if (inList) {
-          processedLines.push("</ul>");
-          inList = false;
-        }
-        processedLines.push(`<div class="ai-numbered-item"><span class="num">${numMatch[1]}.</span> <span>${numMatch[2]}</span></div>`);
-        continue;
-      }
-
-      if (inList) {
-        processedLines.push("</ul>");
-        inList = false;
-      }
-      processedLines.push(`<p class="ai-p">${line}</p>`);
+  // Float next to the selection, flipping above it when there is no room below
+  let positionStyle = $derived.by(() => {
+    if (sheet) return "";
+    const vw = appState.windowWidth;
+    const vh = appState.windowHeight;
+    const width = Math.min(vw - 24, isPhrase ? 420 : 380);
+    if (dragX !== null && dragY !== null) {
+      return `top: ${Math.round(dragY)}px; left: ${Math.round(dragX)}px; width: ${width}px; max-height: ${vh - Math.round(dragY) - 12}px;`;
     }
+    const r = appState.selectionRect;
+    if (!r) return "display: none;";
 
-    if (inList) processedLines.push("</ul>");
-    return processedLines.join("");
-  }
-
-  // Automatically fetch AI definition when card becomes visible for a word
-  $effect(() => {
-    const text = appState.selectedText.trim();
-    if (!appState.lookupCardVisible || !text) {
-      lookupResult = null;
-      lookupError = null;
-      isLoadingLookup = false;
-      showNoteInput = false;
-      chatMessages = [];
-      chatInput = "";
-      showChat = false;
-      saveFeedback = null;
-      dragX = null;
-      dragY = null;
-      passageResult = null;
-      passageError = null;
-      isLoadingPassage = false;
-      return;
+    const left = Math.max(12, Math.min(vw - width - 12, r.left + r.width / 2 - width / 2));
+    const spaceBelow = vh - (r.top + r.height) - 20;
+    const spaceAbove = r.top - 20;
+    const h = Math.min(cardHeight, vh - 24);
+    let top: number;
+    let maxHeight: number;
+    if (spaceBelow >= h || spaceBelow >= spaceAbove) {
+      top = r.top + r.height + 10;
+      maxHeight = Math.max(200, vh - top - 12);
+    } else {
+      maxHeight = Math.max(200, spaceAbove);
+      top = Math.max(12, r.top - 10 - Math.min(h, maxHeight));
     }
-
-    if (isPhrase) {
-      lookupResult = null;
-      passageResult = null;
-      passageError = null;
-      isLoadingPassage = false;
-      return;
-    }
-
-    if (text !== activeQuery) {
-      activeQuery = text;
-      lookupResult = null;
-      lookupError = null;
-      chatMessages = [];
-      chatInput = "";
-      saveFeedback = null;
-      dragX = null;
-      dragY = null;
-      passageResult = null;
-      passageError = null;
-      fetchDefinition(text, appState.selectedSentence);
-    }
+    return `top: ${Math.round(top)}px; left: ${Math.round(left)}px; width: ${width}px; max-height: ${Math.round(maxHeight)}px;`;
   });
 
-  async function handleExplainPassage(mode: "explain" | "translate" | "summarize" = "explain") {
-    const text = appState.selectedText.trim();
-    if (!text || isLoadingPassage) return;
-    isLoadingPassage = true;
-    passageError = null;
+  function startDrag(e: PointerEvent) {
+    if (sheet || e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+    const cardEl = (e.currentTarget as HTMLElement).closest(".lookup-card") as HTMLElement | null;
+    if (!cardEl) return;
+    const rect = cardEl.getBoundingClientRect();
+    const startX = e.clientX;
+    const startY = e.clientY;
 
+    const onMove = (ev: PointerEvent) => {
+      dragX = Math.max(8, Math.min(appState.windowWidth - rect.width - 8, rect.left + ev.clientX - startX));
+      dragY = Math.max(8, Math.min(appState.windowHeight - 120, rect.top + ev.clientY - startY));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  function resetCard() {
+    lookupResult = null;
+    lookupError = null;
+    isLoadingLookup = false;
+    showNoteInput = false;
+    noteContent = "";
+    chatMessages = [];
+    chatInput = "";
+    showChat = false;
+    saveFeedback = null;
+    dragX = null;
+    dragY = null;
+    passageResult = null;
+    passageError = null;
+    isLoadingPassage = null;
+    copied = false;
+  }
+
+  // Fetch the definition when the card opens for a new word
+  $effect(() => {
+    const text = appState.selectedText.trim();
+    const visible = appState.lookupCardVisible;
+    if (!visible || !text) {
+      activeQuery = "";
+      requestToken++;
+      resetCard();
+      return;
+    }
+    const phrase = isPhrase;
+    if (text === activeQuery) {
+      // A key was just added in Settings while the card was open: fetch now
+      if (appState.hasApiKey && !phrase && !lookupResult && !isLoadingLookup && !lookupError) {
+        untrack(() => fetchDefinition(text));
+      }
+      return;
+    }
+    activeQuery = text;
+    requestToken++;
+    untrack(() => {
+      resetCard();
+      if (!phrase) fetchDefinition(text);
+    });
+  });
+
+  function cacheKey(word: string) {
+    return `${appState.aiProvider}|${appState.targetLanguage}|${word.toLowerCase()}`;
+  }
+
+  async function ensureKey(): Promise<boolean> {
+    if (appState.hasApiKey) return true;
     await appState.checkApiKey();
-    if (!appState.hasApiKey) {
-      isLoadingPassage = false;
+    return appState.hasApiKey;
+  }
+
+  async function fetchDefinition(word: string) {
+    const token = requestToken;
+    const cached = lookupCache.get(cacheKey(word));
+    if (cached) {
+      lookupResult = cached;
+      return;
+    }
+    isLoadingLookup = true;
+    lookupError = null;
+    if (!(await ensureKey())) {
+      if (token === requestToken) isLoadingLookup = false;
       return;
     }
 
+    // Give the page-text sentence extraction a moment to provide fuller context
+    await new Promise((r) => setTimeout(r, 60));
+    if (token !== requestToken) return;
+
+    try {
+      const res = await api.lookupWord({
+        word,
+        contextSentence: appState.selectedSentence || null,
+        targetLanguage: appState.targetLanguage,
+        provider: appState.aiProvider,
+      });
+      lookupCache.set(cacheKey(word), res);
+      if (token === requestToken) lookupResult = res;
+    } catch (err: any) {
+      console.warn("AI lookup failed:", err);
+      if (token === requestToken) lookupError = describeError(err, "Could not get a definition.");
+    } finally {
+      if (token === requestToken) isLoadingLookup = false;
+    }
+  }
+
+  function describeError(err: any, fallback: string): string {
+    const msg = typeof err === "string" ? err : err?.message || fallback;
+    if (/429|quota|rate/i.test(msg)) return "The AI provider is rate-limiting requests. Wait a few seconds and retry, or switch models in Settings.";
+    if (/network|connect|dns|timed? ?out/i.test(msg)) return "Couldn't reach the AI provider. Check your internet connection and retry.";
+    if (/401|403|invalid.*key|api key/i.test(msg)) return "The API key was rejected. Update it in Settings.";
+    return msg;
+  }
+
+  async function handleExplainPassage(mode: PassageMode) {
+    const text = appState.selectedText.trim();
+    if (!text || isLoadingPassage) return;
+    const token = requestToken;
+    isLoadingPassage = mode;
+    passageError = null;
+    if (!(await ensureKey())) {
+      isLoadingPassage = null;
+      return;
+    }
     try {
       const res = await api.explainPassage({
         passage: text,
@@ -247,113 +221,75 @@
         context: appState.selectedSentence || null,
         provider: appState.aiProvider,
       });
-      passageResult = { mode, text: res };
+      if (token === requestToken) passageResult = { mode, text: res };
     } catch (err: any) {
       console.error("Passage explanation error:", err);
-      const msg = typeof err === "string" ? err : err?.message || "Could not process passage.";
-      passageError = msg;
+      if (token === requestToken) passageError = describeError(err, "Could not process the passage.");
     } finally {
-      isLoadingPassage = false;
+      if (token === requestToken) isLoadingPassage = null;
     }
   }
 
-  async function handleSavePassageNote() {
-    if (!appState.activeBook || !passageResult) return;
-    const modeLabel = passageResult.mode === "translate"
-      ? `Translation (${appState.targetLanguage})`
-      : (passageResult.mode === "summarize" ? "Key Summary" : "Explanation");
+  function passageLabel(mode: PassageMode) {
+    return mode === "translate" ? `Translation · ${appState.targetLanguage}` : mode === "summarize" ? "Summary" : "Explanation";
+  }
+
+  async function addNote(content: string, feedback = "Saved to notes") {
+    if (!appState.activeBook) return;
     try {
       await api.addNote({
         bookId: appState.activeBook.id,
-        content: `[AI ${modeLabel}]:\n${passageResult.text}`,
+        content,
         quote: appState.selectedText,
-        page: appState.currentPage,
+        page: appState.selectedPage || appState.currentPage,
       });
       await appState.refreshBookMemory(appState.activeBook.id);
-      saveFeedback = "Saved to Notes ✓";
-      setTimeout(() => (saveFeedback = null), 2400);
+      appState.showToast(feedback);
     } catch (err) {
-      console.error("Failed to save passage note:", err);
-    }
-  }
-
-  async function fetchDefinition(word: string, contextSentence?: string) {
-    isLoadingLookup = true;
-    lookupError = null;
-
-    // Check if key is configured
-    await appState.checkApiKey();
-    if (!appState.hasApiKey) {
-      isLoadingLookup = false;
-      return;
-    }
-
-    try {
-      const res = await api.lookupWord({
-        word,
-        contextSentence: contextSentence || null,
-        targetLanguage: appState.targetLanguage,
-        provider: appState.aiProvider,
-      });
-      lookupResult = res;
-    } catch (err: any) {
-      console.warn("AI lookup failed:", err);
-      const msg = typeof err === "string" ? err : err?.message || "Could not retrieve definition.";
-      lookupError = msg;
-    } finally {
-      isLoadingLookup = false;
+      appState.showToast("Could not save the note.", "error");
+      console.error("Failed to save note:", err);
     }
   }
 
   function playPronunciation() {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      const utterance = new SpeechSynthesisUtterance(appState.selectedText);
-      utterance.rate = 0.9;
-      window.speechSynthesis.speak(utterance);
-    }
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(appState.selectedText);
+    utterance.rate = 0.9;
+    window.speechSynthesis.speak(utterance);
   }
 
   async function handleSaveWord() {
     if (!appState.activeBook || isSaving) return;
     isSaving = true;
-    saveFeedback = null;
+    const word = appState.selectedText.trim();
+    const existing = appState.words.find((w) => w.word.toLowerCase() === word.toLowerCase());
     try {
-      const meaningToSave = lookupResult?.meaning || `Selected word: "${appState.selectedText}"`;
-      const meaningHindiToSave = lookupResult?.meaning_hindi || null;
-      const exampleToSave = lookupResult?.example || appState.selectedSentence || null;
-
-      await api.addWord({
-        bookId: appState.activeBook.id,
-        word: appState.selectedText.trim(),
-        meaning: meaningToSave,
-        meaningHindi: meaningHindiToSave,
-        exampleSentence: exampleToSave,
-        page: appState.selectedPage || appState.currentPage,
-        aiGenerated: !!lookupResult,
-      });
-      await appState.refreshBookMemory(appState.activeBook.id);
-      saveFeedback = "Saved ✓";
-      setTimeout(() => (saveFeedback = null), 2400);
-    } catch (err) {
-      // If duplicate, update existing word
-      const existing = appState.words.find(
-        (w) => w.word.toLowerCase() === appState.selectedText.trim().toLowerCase()
-      );
       if (existing) {
-        try {
-          const meaningToSave = lookupResult?.meaning || existing.meaning;
-          const meaningHindiToSave = lookupResult?.meaning_hindi || existing.meaning_hindi;
-          const exampleToSave = lookupResult?.example || existing.example_sentence;
-          await api.updateWord(existing.id, meaningToSave, meaningHindiToSave, exampleToSave);
-          await appState.refreshBookMemory(appState.activeBook.id);
-          saveFeedback = "Updated ✓";
-          setTimeout(() => (saveFeedback = null), 2400);
-        } catch (uErr) {
-          console.error("Failed to update existing word:", uErr);
-        }
+        await api.updateWord(
+          existing.id,
+          lookupResult?.meaning || existing.meaning,
+          lookupResult?.meaning_hindi || existing.meaning_hindi,
+          lookupResult?.example || existing.example_sentence
+        );
+        saveFeedback = "Updated";
       } else {
-        console.error("Failed to save word:", err);
+        await api.addWord({
+          bookId: appState.activeBook.id,
+          word,
+          meaning: lookupResult?.meaning || `“${word}”`,
+          meaningHindi: lookupResult?.meaning_hindi || null,
+          exampleSentence: lookupResult?.example || appState.selectedSentence || null,
+          page: appState.selectedPage || appState.currentPage,
+          aiGenerated: !!lookupResult,
+        });
+        saveFeedback = "Saved";
       }
+      await appState.refreshBookMemory(appState.activeBook.id);
+      setTimeout(() => (saveFeedback = null), 2000);
+    } catch (err) {
+      appState.showToast("Could not save the word.", "error");
+      console.error("Failed to save word:", err);
     } finally {
       isSaving = false;
     }
@@ -362,16 +298,12 @@
   async function handleSendChat(customQuery?: string) {
     const q = (customQuery || chatInput).trim();
     if (!q || isChatting) return;
-
-    // Capture prior history before pushing the new query
-    const priorHistory = chatMessages.map((m) => ({
-      role: m.role,
-      parts: [{ text: m.text }],
-    }));
-
+    const token = requestToken;
+    const priorHistory = chatMessages.map((m) => ({ role: m.role, parts: [{ text: m.text }] }));
     chatMessages = [...chatMessages, { role: "user", text: q }];
     chatInput = "";
     isChatting = true;
+    scrollChat();
 
     try {
       const reply = await api.chatWordInquiry({
@@ -382,496 +314,340 @@
         targetLanguage: appState.targetLanguage,
         provider: appState.aiProvider,
       });
-
-      chatMessages = [...chatMessages, { role: "model", text: reply }];
+      if (token === requestToken) chatMessages = [...chatMessages, { role: "model", text: reply }];
     } catch (err: any) {
-      console.error("Mini chat inquiry error:", err);
-      const msg = typeof err === "string" ? err : err?.message || "Could not get AI response.";
-      chatMessages = [...chatMessages, { role: "model", text: `⚠️ ${msg}` }];
+      console.error("Follow-up chat error:", err);
+      if (token === requestToken) {
+        chatMessages = [...chatMessages, { role: "model", text: `⚠ ${describeError(err, "Could not get an answer.")}` }];
+      }
     } finally {
       isChatting = false;
+      scrollChat();
     }
   }
 
-  async function handleSaveChatAsNote(text: string) {
-    if (!appState.activeBook) return;
-    try {
-      await api.addNote({
-        bookId: appState.activeBook.id,
-        content: `[AI Inquiry on "${appState.selectedText}"]:\n${text}`,
-        quote: appState.selectedText,
-        page: appState.selectedPage || appState.currentPage,
-      });
-      await appState.refreshBookMemory(appState.activeBook.id);
-    } catch (err) {
-      console.error("Failed to save chat answer as note:", err);
-    }
+  function scrollChat() {
+    requestAnimationFrame(() => chatThreadEl?.lastElementChild?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
   }
 
   async function handleSaveNote() {
-    if (!appState.activeBook || !noteContent.trim() || isSaving) return;
+    if (!noteContent.trim() || isSaving) return;
     isSaving = true;
-    try {
-      await api.addNote({
-        bookId: appState.activeBook.id,
-        content: noteContent.trim(),
-        quote: appState.selectedText,
-        page: appState.selectedPage || appState.currentPage,
-      });
-      await appState.refreshBookMemory(appState.activeBook.id);
-      showNoteInput = false;
-      noteContent = "";
-      appState.lookupCardVisible = false;
-    } catch (err) {
-      console.error("Failed to save note:", err);
-    } finally {
-      isSaving = false;
-    }
-  }
-
-  async function handleAddAnnotation(color: string = "yellow") {
-    if (!appState.activeBook) return;
-    try {
-      const rawRects = (appState.selectionNormalizedRects && appState.selectionNormalizedRects.length > 0)
-        ? appState.selectionNormalizedRects
-        : [];
-      const rects = mergeLineRects(rawRects);
-      await api.addHighlight({
-        bookId: appState.activeBook.id,
-        page: appState.selectedPage || appState.currentPage,
-        text: appState.selectedText,
-        rectsJson: JSON.stringify(rects),
-        color,
-      });
-      await appState.refreshBookMemory(appState.activeBook.id);
-      appState.lookupCardVisible = false;
-      window.getSelection()?.removeAllRanges();
-    } catch (err) {
-      console.error("Failed to add annotation:", err);
-    }
-  }
-
-  async function handleAddHighlight() {
-    return handleAddAnnotation("yellow");
-  }
-
-  function handleOpenMemory(tab: "words" | "notes") {
-    appState.activeMemoryTab = tab;
-    appState.memoryDrawerOpen = true;
+    await addNote(noteContent.trim(), "Note saved");
+    isSaving = false;
+    showNoteInput = false;
+    noteContent = "";
     appState.lookupCardVisible = false;
   }
+
+  async function handleAnnotate(colorId: string) {
+    if (!canAnnotate) return;
+    const color = underlineMode ? `underline-${colorId}` : colorId;
+    const rects = appState.selectionNormalizedRects;
+    const page = appState.selectedPage || appState.currentPage;
+    const text = appState.selectedText;
+    appState.lookupCardVisible = false;
+    window.getSelection()?.removeAllRanges();
+    await appState.addHighlight({ page, text, rects, color });
+  }
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(appState.selectedText);
+      copied = true;
+      setTimeout(() => (copied = false), 1400);
+    } catch (err) {
+      console.error("Copy failed:", err);
+    }
+  }
+
+  function close() {
+    appState.lookupCardVisible = false;
+  }
+
+  const wordChips = $derived([
+    { label: `Use in ${appState.targetLanguage}`, q: `${appState.targetLanguage} translation & sentence examples` },
+    { label: "Simpler", q: "Explain in simple terms with nuances" },
+    { label: "Etymology", q: "Word origin & etymology" },
+  ]);
+  const passageChips = $derived([
+    { label: "Key arguments", q: "Break down the key arguments simply" },
+    { label: `Line by line (${appState.targetLanguage})`, q: `Translate into ${appState.targetLanguage} line by line` },
+    { label: "Context & tone", q: "Explain historical or literary context" },
+  ]);
 </script>
 
+{#snippet loading(label: string)}
+  <div class="lookup-loading" aria-live="polite">
+    <div class="shimmer-line" style="width: 92%"></div>
+    <div class="shimmer-line" style="width: 76%"></div>
+    <div class="shimmer-line" style="width: 54%"></div>
+    <span class="loading-label">{label}</span>
+  </div>
+{/snippet}
+
+{#snippet noKey(what: string)}
+  <div class="banner info">
+    <Icon name="key" size={16} />
+    <div>
+      <p>Add a free {providerName} API key to {what}.</p>
+      <button class="link-btn" onclick={() => (appState.settingsModalOpen = true)}>Open settings →</button>
+    </div>
+  </div>
+{/snippet}
+
+{#snippet chat(chips: { label: string; q: string }[], placeholder: string)}
+  <div class="chat-section">
+    <button class="chat-toggle" class:expanded={showChat} onclick={() => (showChat = !showChat)} aria-expanded={showChat}>
+      <Icon name="message" size={14} />
+      <span>Ask a follow-up</span>
+      <Icon name={showChat ? "chevron-up" : "chevron-down"} size={14} />
+    </button>
+
+    {#if showChat}
+      <div class="mini-chat">
+        {#if chatMessages.length === 0}
+          <div class="quick-chips">
+            {#each chips as c}
+              <button class="chip" onclick={() => handleSendChat(c.q)}>{c.label}</button>
+            {/each}
+          </div>
+        {:else}
+          <div class="chat-thread" bind:this={chatThreadEl}>
+            {#each chatMessages as msg}
+              <div class="chat-bubble {msg.role}">
+                {#if msg.role === "model"}
+                  <div class="ai-text">{@html formatAiMarkdown(msg.text)}</div>
+                  <button class="bubble-action" onclick={() => addNote(`[AI on “${appState.selectedText}”]:\n${msg.text}`)} title="Save answer to notes">
+                    <Icon name="pen" size={12} /> Save as note
+                  </button>
+                {:else}
+                  {msg.text}
+                {/if}
+              </div>
+            {/each}
+            {#if isChatting}
+              <div class="chat-thinking"><span></span><span></span><span></span></div>
+            {/if}
+          </div>
+        {/if}
+
+        <form
+          class="chat-input-bar"
+          onsubmit={(e) => {
+            e.preventDefault();
+            handleSendChat();
+          }}
+        >
+          <input type="text" bind:value={chatInput} {placeholder} aria-label="Follow-up question" />
+          <button type="submit" class="send-btn" disabled={isChatting || !chatInput.trim()} aria-label="Send">
+            <Icon name="send" size={14} />
+          </button>
+        </form>
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
 {#if appState.lookupCardVisible && appState.selectedText}
+  {#if sheet}
+    <button class="sheet-scrim" aria-label="Close" onclick={close}></button>
+  {/if}
   <div
     class="lookup-card"
+    class:sheet
     style={positionStyle}
+    bind:offsetHeight={cardHeight}
     role="dialog"
-    aria-label="Word Definition & Actions"
-    onclick={(e) => e.stopPropagation()}
-    onmousedown={(e) => e.stopPropagation()}
+    aria-label="Lookup: {appState.selectedText}"
+    tabindex="-1"
+    onpointerdown={(e) => e.stopPropagation()}
   >
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="card-header"
-      onmousedown={startDrag}
-      style="cursor: grab;"
-      title="Click and drag to move card"
-    >
+    <header class="card-header" onpointerdown={startDrag}>
+      {#if sheet}<div class="sheet-handle"></div>{/if}
       <div class="word-info">
-        <span class="drag-handle" title="Drag to move">⋮⋮</span>
-        <span class="selected-text">{appState.selectedText}</span>
-        {#if lookupResult?.part_of_speech}
-          <span class="pos-badge">{lookupResult.part_of_speech}</span>
-        {/if}
-        {#if !isPhrase}
-          <button class="speaker-btn" onclick={playPronunciation} title="Pronounce word">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-            </svg>
+        {#if isPhrase}
+          <span class="kind-label"><Icon name="sparkles" size={13} /> Passage · {wordCount} words</span>
+        {:else}
+          <span class="selected-word" title={appState.selectedText}>{appState.selectedText}</span>
+          {#if lookupResult?.pronunciation}
+            <span class="pronunciation">{lookupResult.pronunciation}</span>
+          {/if}
+          {#if lookupResult?.part_of_speech}
+            <span class="pos-badge">{lookupResult.part_of_speech}</span>
+          {/if}
+          <button class="icon-btn xs" onclick={playPronunciation} title="Pronounce" aria-label="Pronounce">
+            <Icon name="volume" size={15} />
           </button>
         {/if}
       </div>
-      <button class="close-btn" onclick={() => (appState.lookupCardVisible = false)}>×</button>
-    </div>
+      <button class="icon-btn xs" onclick={close} title="Close (Esc)" aria-label="Close">
+        <Icon name="x" size={16} />
+      </button>
+    </header>
 
-    {#if !showNoteInput}
+    {#if showNoteInput}
+      <div class="quick-note">
+        <blockquote class="quote">{appState.selectedText}</blockquote>
+        <!-- svelte-ignore a11y_autofocus -->
+        <textarea
+          bind:value={noteContent}
+          placeholder="Your thoughts on this passage…"
+          rows="4"
+          autofocus
+          onkeydown={(e) => {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) handleSaveNote();
+          }}
+        ></textarea>
+        <div class="note-actions">
+          <span class="hint">Ctrl + Enter to save</span>
+          <button class="btn-ghost" onclick={() => (showNoteInput = false)}>Cancel</button>
+          <button class="btn-primary" onclick={handleSaveNote} disabled={isSaving || !noteContent.trim()}>
+            {isSaving ? "Saving…" : "Save note"}
+          </button>
+        </div>
+      </div>
+    {:else}
       <div class="card-body">
-        {#if isWordSaved && !saveFeedback}
-          <div class="saved-indicator">
-            <span>✓ Saved in vocabulary</span>
-            <button class="link-btn" onclick={() => handleOpenMemory('words')}>View in Memory →</button>
-          </div>
-        {:else if saveFeedback}
-          <div class="saved-indicator feedback">
-            <span>{saveFeedback}</span>
-            <button class="link-btn" onclick={() => handleOpenMemory('words')}>View in Memory →</button>
-          </div>
-        {/if}
-
         {#if isPhrase}
-          <div class="phrase-preview">
-            <div class="phrase-header">
-              <span class="label">Passage ({appState.selectedText.trim().split(/\s+/).length} words):</span>
-            </div>
-            <p class="quote">"{appState.selectedText}"</p>
+          <blockquote class="quote clamp">{appState.selectedText}</blockquote>
 
-            <!-- Action buttons for paragraph: Explain, Translate, Summarize -->
-            <div class="passage-actions-bar">
+          <div class="passage-actions">
+            {#each [{ id: "explain", label: "Explain", icon: "lightbulb" }, { id: "translate", label: "Translate", icon: "languages" }, { id: "summarize", label: "Summarize", icon: "list" }] as a}
               <button
-                class="passage-action-btn {passageResult?.mode === 'explain' ? 'active' : ''}"
-                onclick={() => handleExplainPassage('explain')}
-                disabled={isLoadingPassage}
+                class="passage-btn"
+                class:active={passageResult?.mode === a.id}
+                onclick={() => handleExplainPassage(a.id as PassageMode)}
+                disabled={!!isLoadingPassage}
               >
-                💡 Explain Passage
+                {#if isLoadingPassage === a.id}
+                  <span class="mini-spinner"></span>
+                {:else}
+                  <Icon name={a.icon} size={15} />
+                {/if}
+                {a.label}
               </button>
-              <button
-                class="passage-action-btn {passageResult?.mode === 'translate' ? 'active' : ''}"
-                onclick={() => handleExplainPassage('translate')}
-                disabled={isLoadingPassage}
-              >
-                🌐 Translate ({appState.targetLanguage})
-              </button>
-              <button
-                class="passage-action-btn {passageResult?.mode === 'summarize' ? 'active' : ''}"
-                onclick={() => handleExplainPassage('summarize')}
-                disabled={isLoadingPassage}
-              >
-                📝 Key Summary
-              </button>
-            </div>
+            {/each}
+          </div>
 
-            {#if isLoadingPassage}
-              <div class="lookup-loading">
-                <div class="shimmer-line line-1"></div>
-                <div class="shimmer-line line-2"></div>
-                <div class="shimmer-line line-3"></div>
-                <span class="loading-label">Analyzing with {appState.aiProvider === 'openrouter' ? 'OpenRouter' : 'Gemini'}...</span>
-              </div>
-            {:else if !appState.hasApiKey}
-              <div class="no-key-banner">
-                <p>Connect your {appState.aiProvider === 'openrouter' ? 'OpenRouter' : 'Gemini'} API key in Settings to explain and translate passages.</p>
-                <button class="btn-setup-key" onclick={() => (appState.settingsModalOpen = true)}>
-                  Configure API Key in Settings
-                </button>
-              </div>
-            {:else if passageError}
-              <div class="lookup-error-banner">
+          {#if isLoadingPassage}
+            {@render loading(`Thinking with ${providerName}…`)}
+          {:else if !appState.hasApiKey && !passageResult}
+            {@render noKey("explain, translate and summarize passages")}
+          {:else if passageError}
+            <div class="banner error">
+              <Icon name="alert" size={16} />
+              <div>
                 <p>{passageError}</p>
-                <button class="btn-retry" onclick={() => handleExplainPassage(passageResult?.mode || 'explain')}>
-                  Retry
+                <button class="link-btn" onclick={() => handleExplainPassage(passageResult?.mode || "explain")}>Retry</button>
+              </div>
+            </div>
+          {:else if passageResult}
+            <section class="result">
+              <div class="result-header">
+                <span class="result-badge">{passageLabel(passageResult.mode)}</span>
+                <button
+                  class="link-btn"
+                  onclick={() => passageResult && addNote(`[AI ${passageLabel(passageResult.mode)}]:\n${passageResult.text}`)}
+                >
+                  <Icon name="pen" size={12} /> Save as note
                 </button>
               </div>
-            {:else if passageResult}
-              <div class="passage-result-card">
-                <div class="passage-result-header">
-                  <span class="result-badge {passageResult.mode}">
-                    {passageResult.mode === 'translate' ? `Translation (${appState.targetLanguage})` : (passageResult.mode === 'summarize' ? 'Key Summary' : 'Explanation')}
-                  </span>
-                  <button class="save-passage-note-btn" onclick={handleSavePassageNote} title="Save to Book Notes">
-                    + Save to Notes
-                  </button>
-                </div>
-                <div class="passage-result-text model-formatted">
-                  {@html formatAiMarkdown(passageResult.text)}
-                </div>
-              </div>
-
-              <!-- Mini AI Inquiry Chat Toggle for Passages -->
-              <button
-                class="chat-toggle-btn {showChat ? 'expanded' : ''}"
-                onclick={() => (showChat = !showChat)}
-              >
-                <div class="chat-toggle-left">
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"/>
-                  </svg>
-                  <span>Inquire Further About Passage</span>
-                </div>
-                <span class="arrow">{showChat ? "▲" : "▼"}</span>
-              </button>
-
-              {#if showChat}
-                <div class="mini-chat-section">
-                  <div class="quick-chips">
-                    <button class="chip" onclick={() => handleSendChat("Break down the key arguments simply")}>
-                      Key arguments
-                    </button>
-                    <button class="chip" onclick={() => handleSendChat(`Translate into ${appState.targetLanguage} line by line`)}>
-                      {appState.targetLanguage} line-by-line
-                    </button>
-                    <button class="chip" onclick={() => handleSendChat("Explain historical or literary context")}>
-                      Context & tone
-                    </button>
-                  </div>
-
-                  {#if chatMessages.length > 0}
-                    <div class="chat-thread">
-                      {#each chatMessages as msg}
-                        <div class="chat-bubble {msg.role}">
-                          {#if msg.role === "model"}
-                            <div class="bubble-text model-formatted">{@html formatAiMarkdown(msg.text)}</div>
-                          {:else}
-                            <div class="bubble-text">{msg.text}</div>
-                          {/if}
-                          {#if msg.role === "model"}
-                            <button
-                              class="save-answer-btn"
-                              onclick={() => handleSaveChatAsNote(msg.text)}
-                              title="Save response to notes"
-                            >
-                              + Note
-                            </button>
-                          {/if}
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-
-                  {#if isChatting}
-                    <div class="chat-thinking">
-                      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-                      <span class="thinking-text">Thinking...</span>
-                    </div>
-                  {/if}
-
-                  <div class="mini-chat-input-bar">
-                    <input
-                      type="text"
-                      bind:value={chatInput}
-                      onkeydown={(e) => e.key === "Enter" && handleSendChat()}
-                      placeholder="Ask question about this passage..."
-                      class="chat-input"
-                    />
-                    <button
-                      class="send-btn"
-                      onclick={() => handleSendChat()}
-                      disabled={isChatting || !chatInput.trim()}
-                      title="Send inquiry"
-                    >
-                      ➔
-                    </button>
-                  </div>
-                </div>
-              {/if}
-            {/if}
-          </div>
+              <div class="ai-text">{@html formatAiMarkdown(passageResult.text)}</div>
+            </section>
+            {@render chat(passageChips, "Ask about this passage…")}
+          {/if}
         {:else if isLoadingLookup}
-          <div class="lookup-loading">
-            <div class="shimmer-line line-1"></div>
-            <div class="shimmer-line line-2"></div>
-            <div class="shimmer-line line-3"></div>
-            <span class="loading-label">Looking up with {appState.aiProvider === 'openrouter' ? 'OpenRouter' : 'Gemini'}...</span>
-          </div>
+          {@render loading(`Looking up with ${providerName}…`)}
         {:else if !appState.hasApiKey}
-          <div class="no-key-banner">
-            <p>Connect your {appState.aiProvider === 'openrouter' ? 'OpenRouter' : 'Gemini'} API key in Settings to unlock instant {appState.targetLanguage} meanings and AI inquiry.</p>
-            <button class="btn-setup-key" onclick={() => (appState.settingsModalOpen = true)}>
-              Configure API Key in Settings
-            </button>
+          {@render noKey(`see meanings and ${appState.targetLanguage} translations instantly`)}
+        {:else if lookupError}
+          <div class="banner error">
+            <Icon name="alert" size={16} />
+            <div>
+              <p>{lookupError}</p>
+              <button class="link-btn" onclick={() => {
+                lookupError = null;
+                lookupCache.delete(cacheKey(appState.selectedText));
+                fetchDefinition(appState.selectedText);
+              }}>Retry</button>
+            </div>
           </div>
         {:else if lookupResult}
-          <div class="definition-content">
-            <!-- English Meaning -->
-            <div class="def-block">
-              <span class="def-lang-tag en">EN</span>
-              <p class="definition-meaning">{lookupResult.meaning}</p>
-            </div>
+          <div class="definition">
+            <p class="meaning">{lookupResult.meaning}</p>
 
-            <!-- Target Language Meaning -->
             {#if lookupResult.meaning_hindi}
-              <div class="def-block hindi-block">
-                <span class="def-lang-tag hi">{appState.targetLanguage}</span>
-                <p class="definition-hindi">{lookupResult.meaning_hindi}</p>
+              <div class="translation">
+                <span class="lang-tag">{appState.targetLanguage}</span>
+                <p>{lookupResult.meaning_hindi}</p>
               </div>
             {/if}
-            
+
             {#if lookupResult.meaning_in_context}
-              <div class="context-meaning">
-                <span class="context-label">In context:</span>
-                <span class="context-text">{lookupResult.meaning_in_context}</span>
+              <div class="in-context">
+                <span class="section-label">Here it means</span>
+                <p>{lookupResult.meaning_in_context}</p>
               </div>
             {/if}
 
             {#if lookupResult.example}
-              <div class="example-quote">
-                <em>"{lookupResult.example}"</em>
-              </div>
+              <p class="example">“{lookupResult.example}”</p>
             {/if}
 
             {#if lookupResult.synonyms && lookupResult.synonyms.length > 0}
-              <div class="synonyms-list">
-                {#each lookupResult.synonyms.slice(0, 4) as syn}
+              <div class="synonyms">
+                <span class="section-label">Similar</span>
+                {#each lookupResult.synonyms.slice(0, 5) as syn}
                   <span class="syn-chip">{syn}</span>
                 {/each}
               </div>
             {/if}
+          </div>
+          {@render chat(wordChips, "Ask anything about this word…")}
+        {/if}
+      </div>
 
-            <!-- Mini AI Inquiry Chat Toggle -->
+      <footer class="card-actions">
+        {#if canAnnotate}
+          <div class="annotate-group" role="group" aria-label="Highlight selection">
             <button
-              class="chat-toggle-btn {showChat ? 'expanded' : ''}"
-              onclick={() => (showChat = !showChat)}
+              class="mode-toggle"
+              onclick={() => (underlineMode = !underlineMode)}
+              title={underlineMode ? "Underline mode (click for highlight)" : "Highlight mode (click for underline)"}
+              aria-label={underlineMode ? "Switch to highlight" : "Switch to underline"}
             >
-              <div class="chat-toggle-left">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="m3 21 1.9-5.7a8.5 8.5 0 1 1 3.8 3.8z"/>
-                </svg>
-                <span>Inquire Further</span>
-              </div>
-              <span class="arrow">{showChat ? "▲" : "▼"}</span>
+              <Icon name={underlineMode ? "underline" : "highlighter"} size={15} />
             </button>
-
-            <!-- Mini Chat Container -->
-            {#if showChat}
-              <div class="mini-chat-section">
-                <!-- Suggested Quick Prompts -->
-                <div class="quick-chips">
-                  <button class="chip" onclick={() => handleSendChat(`${appState.targetLanguage} translation & sentence examples`)}>
-                    {appState.targetLanguage} usage
-                  </button>
-                  <button class="chip" onclick={() => handleSendChat("Explain in simple terms with nuances")}>
-                    Simpler terms
-                  </button>
-                  <button class="chip" onclick={() => handleSendChat("Word origin & etymology")}>
-                    Etymology
-                  </button>
-                </div>
-
-                {#if chatMessages.length > 0}
-                  <div class="chat-thread">
-                    {#each chatMessages as msg}
-                      <div class="chat-bubble {msg.role}">
-                        {#if msg.role === "model"}
-                          <div class="bubble-text model-formatted">{@html formatAiMarkdown(msg.text)}</div>
-                        {:else}
-                          <div class="bubble-text">{msg.text}</div>
-                        {/if}
-                        {#if msg.role === "model"}
-                          <button
-                            class="save-answer-btn"
-                            onclick={() => handleSaveChatAsNote(msg.text)}
-                            title="Save response to notes"
-                          >
-                            + Note
-                          </button>
-                        {/if}
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-
-                {#if isChatting}
-                  <div class="chat-thinking">
-                    <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-                    <span class="thinking-text">{appState.aiProvider === 'openrouter' ? 'OpenRouter' : 'Gemini'} is thinking...</span>
-                  </div>
-                {/if}
-
-                <div class="mini-chat-input-bar">
-                  <input
-                    type="text"
-                    bind:value={chatInput}
-                    onkeydown={(e) => e.key === "Enter" && handleSendChat()}
-                    placeholder="Ask follow-up question..."
-                    class="chat-input"
-                  />
-                  <button
-                    class="send-btn"
-                    onclick={() => handleSendChat()}
-                    disabled={isChatting || !chatInput.trim()}
-                    title="Send inquiry"
-                  >
-                    ➔
-                  </button>
-                </div>
-              </div>
-            {/if}
-          </div>
-        {:else if lookupError}
-          <div class="lookup-error-banner">
-            <p>{lookupError}</p>
-            <button class="btn-retry" onclick={() => fetchDefinition(appState.selectedText, appState.selectedSentence)}>
-              Retry
-            </button>
-          </div>
-        {:else}
-          <div class="context-preview">
-            <span class="label">Context sentence:</span>
-            <p class="sentence">"{appState.selectedSentence}"</p>
+            {#each ANNOTATION_COLORS as col}
+              <button
+                class="swatch"
+                class:underline={underlineMode}
+                style="--c: {col.color};"
+                title="{underlineMode ? 'Underline' : 'Highlight'} {col.label}"
+                aria-label="{underlineMode ? 'Underline' : 'Highlight'} in {col.label}"
+                onclick={() => handleAnnotate(col.id)}
+              ></button>
+            {/each}
           </div>
         {/if}
-      </div>
 
-      <div class="card-actions">
-        {#if !isPhrase}
-          <button class="btn btn-primary" onclick={handleSaveWord} disabled={isSaving}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>
-            </svg>
-            <span>{isSaving ? "Saving..." : (saveFeedback || (isWordSaved ? "Saved ✓" : "Save Word"))}</span>
+        <div class="action-buttons">
+          <button class="icon-btn sm" onclick={handleCopy} title="Copy" aria-label="Copy text">
+            <Icon name={copied ? "check" : "copy"} size={15} />
           </button>
-        {/if}
-
-        <button class="btn btn-secondary" onclick={() => (showNoteInput = true)}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
-          </svg>
-          <span>Note</span>
-        </button>
-
-        <div class="annotation-palette-group">
-          <!-- Highlight Palette Row -->
-          <div class="mini-palette-row" title="Highlight selection">
-            <span class="mini-palette-label" title="Highlight">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M5 4v3h5.5v12h3V7H19V4z"/></svg>
-            </span>
-            <div class="palette-swatches">
-              {#each ANNOTATION_COLORS as col}
-                <button
-                  class="palette-swatch highlight-swatch {col.id}"
-                  style="background: {col.color};"
-                  title="Highlight {col.label}"
-                  onclick={() => handleAddAnnotation(col.id)}
-                ></button>
-              {/each}
-            </div>
-          </div>
-
-          <!-- Underline Palette Row -->
-          <div class="mini-palette-row" title="Underline selection">
-            <span class="mini-palette-label" title="Underline">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M6 3v7a6 6 0 0 0 12 0V3M4 21h16"/></svg>
-            </span>
-            <div class="palette-swatches">
-              {#each ANNOTATION_COLORS as col}
-                <button
-                  class="palette-swatch underline-swatch {col.id}"
-                  style="border-bottom: 2.5px solid {col.color};"
-                  title="Underline {col.label}"
-                  onclick={() => handleAddAnnotation(`underline-${col.id}`)}
-                ></button>
-              {/each}
-            </div>
-          </div>
-        </div>
-      </div>
-    {:else}
-      <!-- Quick Inline Note Input -->
-      <div class="quick-note">
-        <div class="quote-preview">"{appState.selectedText}"</div>
-        <textarea
-          bind:value={noteContent}
-          placeholder="Write your note here..."
-          rows="3"
-        ></textarea>
-        <div class="note-actions">
-          <button class="btn-ghost" onclick={() => (showNoteInput = false)}>Cancel</button>
-          <button class="btn-primary" onclick={handleSaveNote} disabled={isSaving || !noteContent.trim()}>
-            {isSaving ? "Saving..." : "Save Note"}
+          <button class="icon-btn sm" onclick={() => (showNoteInput = true)} title="Add note" aria-label="Add note">
+            <Icon name="pen" size={15} />
           </button>
+          {#if !isPhrase}
+            <button class="save-btn" class:saved={isWordSaved || !!saveFeedback} onclick={handleSaveWord} disabled={isSaving}>
+              <Icon name={isWordSaved || saveFeedback ? "bookmark-check" : "bookmark"} size={15} />
+              <span>{isSaving ? "Saving…" : saveFeedback || (isWordSaved ? "Saved" : "Save word")}</span>
+            </button>
+          {/if}
         </div>
-      </div>
+      </footer>
     {/if}
   </div>
 {/if}
@@ -879,479 +655,371 @@
 <style>
   .lookup-card {
     position: fixed;
-    width: 350px;
-    background: var(--bg-surface-elevated, #1c1c1f);
-    border: 1px solid var(--border-subtle, #333);
-    border-radius: var(--radius-md, 8px);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    width: 380px;
+    max-height: calc(100vh - 24px);
+    background: var(--bg-surface-elevated);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
     z-index: 500;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    animation: cardPop 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: cardPop 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   }
 
   @keyframes cardPop {
     from {
       opacity: 0;
-      transform: scale(0.96) translateY(4px);
+      transform: translateY(4px) scale(0.98);
     }
     to {
       opacity: 1;
-      transform: scale(1) translateY(0);
+      transform: none;
     }
   }
 
+  /* Bottom sheet in narrow windows */
+  .lookup-card.sheet {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: min(70vh, 560px);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border-bottom: none;
+    animation: sheetUp 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes sheetUp {
+    from {
+      transform: translateY(40px);
+      opacity: 0.4;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+
+  .sheet-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 499;
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 0;
+    cursor: default;
+  }
+
+  .sheet-handle {
+    position: absolute;
+    top: 5px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-strong);
+  }
+
   .card-header {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border-subtle);
-    background: var(--bg-surface);
+    gap: 8px;
+    padding: 12px 8px 8px 16px;
+    cursor: grab;
     user-select: none;
+    flex-shrink: 0;
   }
 
-  .drag-handle {
-    color: var(--text-muted);
-    font-size: 13px;
-    user-select: none;
-    letter-spacing: -2px;
-    margin-right: 4px;
-    cursor: grab;
+  .sheet .card-header {
+    cursor: default;
+    padding-top: 16px;
+  }
+
+  .card-header:active {
+    cursor: grabbing;
   }
 
   .word-info {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    overflow: hidden;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    min-width: 0;
   }
 
-  .selected-text {
+  .selected-word {
+    font-family: var(--font-reading);
+    font-size: 21px;
     font-weight: 600;
-    font-size: 13.5px;
+    line-height: 1.2;
     color: var(--text-primary);
-    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 190px;
+    white-space: nowrap;
+    max-width: 230px;
+  }
+
+  .pronunciation {
+    font-size: 12.5px;
+    color: var(--text-muted);
   }
 
   .pos-badge {
-    font-size: 10px;
+    font-size: 11.5px;
     font-style: italic;
-    background: var(--accent-subtle);
     color: var(--accent);
-    padding: 1px 6px;
-    border-radius: 4px;
-    text-transform: lowercase;
   }
 
-  .speaker-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    padding: 2px 4px;
-    border-radius: 3px;
-    display: flex;
+  .kind-label {
+    display: inline-flex;
     align-items: center;
-    transition: color 0.15s ease;
-  }
-
-  .speaker-btn:hover {
-    color: var(--accent);
-  }
-
-  .close-btn {
-    background: transparent;
-    border: none;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
     color: var(--text-secondary);
-    font-size: 18px;
-    cursor: pointer;
-    padding: 0 4px;
-    line-height: 1;
   }
 
-  .close-btn:hover {
-    color: var(--text-primary);
+  .icon-btn.xs {
+    width: 28px;
+    height: 28px;
+    align-self: center;
+  }
+
+  .icon-btn.sm {
+    width: 30px;
+    height: 30px;
   }
 
   .card-body {
-    padding: 12px 14px;
-    font-size: 12.5px;
-    color: var(--text-primary);
-    max-height: 320px;
+    padding: 2px 16px 14px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
+    font-size: 13.5px;
+    color: var(--text-primary);
+    min-height: 0;
+    flex: 1;
+    user-select: text;
   }
 
-  .saved-indicator {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 6px 10px;
-    background: rgba(16, 185, 129, 0.12);
-    border: 1px solid rgba(16, 185, 129, 0.25);
-    border-radius: var(--radius-sm, 6px);
-    color: #10b981;
-    font-size: 11.5px;
-    font-weight: 500;
+  .card-body:empty {
+    display: none;
   }
 
-  .link-btn {
-    background: transparent;
-    border: none;
-    color: #10b981;
-    font-size: 11px;
-    cursor: pointer;
-    text-decoration: underline;
-    padding: 0;
+  .meaning {
+    font-size: 14.5px;
+    line-height: 1.55;
   }
 
-  .definition-content {
+  .definition {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
   }
 
-  .def-block {
+  .translation {
     display: flex;
-    align-items: flex-start;
     gap: 8px;
-    padding: 6px 8px;
-    border-radius: 6px;
-    background: var(--bg-hover);
-  }
-
-  .def-block.hindi-block {
-    background: var(--bg-hover);
-    border-left: 3px solid var(--accent);
-  }
-
-  .def-lang-tag {
-    font-size: 9.5px;
-    font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 3px;
-    letter-spacing: 0.5px;
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-
-  .def-lang-tag.en {
+    align-items: baseline;
+    padding: 8px 10px;
     background: var(--accent-subtle);
-    color: var(--accent);
-  }
-
-  .def-lang-tag.hi {
-    background: var(--accent-subtle);
-    color: var(--accent);
-  }
-
-  .definition-hindi {
-    margin: 0;
-    line-height: 1.45;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-primary);
-    font-family: inherit;
-  }
-
-  .chat-toggle-btn {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-primary);
-    padding: 7px 10px;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    margin-top: 4px;
-    transition: all 0.15s ease;
-  }
-
-  .chat-toggle-btn:hover,
-  .chat-toggle-btn.expanded {
-    background: var(--bg-hover);
-    border-color: var(--accent);
-  }
-
-  .chat-toggle-left {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .mini-chat-section {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 2px;
-    padding: 8px;
-    background: var(--bg-surface);
-    border-radius: 6px;
-    border: 1px solid var(--border-subtle);
-  }
-
-  .quick-chips {
-    display: flex;
-    gap: 5px;
-    overflow-x: auto;
-    padding-bottom: 2px;
-  }
-
-  .chip {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-primary);
-    border-radius: 12px;
-    padding: 3px 9px;
-    font-size: 11px;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.12s ease;
-  }
-
-  .chip:hover {
-    background: var(--accent-subtle);
-    color: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .chat-thread {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: 150px;
-    overflow-y: auto;
-    padding-right: 2px;
-  }
-
-  .chat-bubble {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding: 7px 10px;
-    border-radius: 6px;
-    font-size: 12px;
-    line-height: 1.45;
-  }
-
-  .chat-bubble.user {
-    align-self: flex-end;
-    background: var(--accent);
-    color: var(--accent-text, #ffffff);
-    max-width: 85%;
-  }
-
-  .chat-bubble.model {
-    align-self: flex-start;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-subtle);
-    max-width: 95%;
-  }
-
-  .bubble-text.model-formatted,
-  .passage-result-text.model-formatted {
-    font-size: 12px;
+    border-radius: var(--radius-sm);
     line-height: 1.5;
   }
 
-  .bubble-text.model-formatted :global(p.ai-p),
-  .passage-result-text.model-formatted :global(p.ai-p) {
-    margin: 0 0 5px 0;
+  .lang-tag {
+    flex-shrink: 0;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--accent);
+    text-transform: uppercase;
   }
 
-  .bubble-text.model-formatted :global(p.ai-p:last-child),
-  .passage-result-text.model-formatted :global(p.ai-p:last-child) {
-    margin-bottom: 0;
-  }
-
-  .bubble-text.model-formatted :global(ul.ai-list),
-  .passage-result-text.model-formatted :global(ul.ai-list) {
-    margin: 3px 0 5px 0;
-    padding-left: 16px;
-    list-style-type: disc;
-  }
-
-  .bubble-text.model-formatted :global(ul.ai-list li),
-  .passage-result-text.model-formatted :global(ul.ai-list li) {
-    margin-bottom: 3px;
-    line-height: 1.45;
-  }
-
-  .bubble-text.model-formatted :global(strong),
-  .passage-result-text.model-formatted :global(strong) {
+  .section-label {
+    display: block;
+    font-size: 10.5px;
     font-weight: 600;
-    color: var(--accent-light, #818cf8);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 3px;
   }
 
-  .bubble-text.model-formatted :global(em),
-  .passage-result-text.model-formatted :global(em) {
+  .in-context p {
+    line-height: 1.5;
+    color: var(--text-secondary);
+  }
+
+  .example {
+    font-family: var(--font-reading);
     font-style: italic;
+    line-height: 1.5;
     color: var(--text-secondary);
+    padding-left: 10px;
+    border-left: 2px solid var(--border-strong);
   }
 
-  .bubble-text.model-formatted :global(code),
-  .passage-result-text.model-formatted :global(code) {
-    background: rgba(255, 255, 255, 0.1);
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-family: monospace;
-    font-size: 11px;
-  }
-
-  .bubble-text.model-formatted :global(.ai-spacer),
-  .passage-result-text.model-formatted :global(.ai-spacer) {
-    height: 5px;
-  }
-
-  .bubble-text.model-formatted :global(.ai-numbered-item),
-  .passage-result-text.model-formatted :global(.ai-numbered-item) {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 3px;
-  }
-
-  .bubble-text.model-formatted :global(.ai-numbered-item .num),
-  .passage-result-text.model-formatted :global(.ai-numbered-item .num) {
-    font-weight: 600;
-    color: var(--accent);
-  }
-
-  .save-answer-btn {
-    align-self: flex-end;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
-    padding: 2px 7px;
-    font-size: 10px;
-    border-radius: 3px;
-    cursor: pointer;
-    margin-top: 3px;
-  }
-
-  .save-answer-btn:hover {
-    background: var(--accent-subtle);
-    color: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .chat-thinking {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    color: var(--accent);
-    padding: 4px 6px;
-  }
-
-  .dot {
-    width: 5px;
-    height: 5px;
-    background: var(--accent);
-    border-radius: 50%;
-    animation: blink 1.2s infinite ease-in-out;
-  }
-  .dot:nth-child(2) { animation-delay: 0.2s; }
-  .dot:nth-child(3) { animation-delay: 0.4s; }
-
-  @keyframes blink {
-    0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
-    40% { opacity: 1; transform: scale(1.2); }
-  }
-
-  .mini-chat-input-bar {
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
-
-  .chat-input {
-    flex: 1;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-subtle);
-    border-radius: 4px;
-    color: var(--text-primary);
-    padding: 6px 9px;
-    font-size: 12px;
-    outline: none;
-  }
-
-  .chat-input:focus {
-    border-color: var(--accent);
-  }
-
-  .send-btn {
-    background: var(--accent);
-    border: none;
-    color: var(--accent-text, #ffffff);
-    padding: 6px 11px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 13px;
-  }
-
-  .send-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .definition-meaning {
-    margin: 0;
-    line-height: 1.45;
-    font-size: 13px;
-    color: var(--text-primary);
-  }
-
-  .context-meaning {
-    font-size: 12px;
-    line-height: 1.4;
-    color: var(--text-primary);
-    background: var(--accent-subtle);
-    padding: 5px 8px;
-    border-radius: 4px;
-  }
-
-  .context-label {
-    font-weight: 600;
-    margin-right: 4px;
-  }
-
-  .example-quote {
-    font-size: 12px;
-    color: var(--text-secondary);
-    line-height: 1.4;
-    border-left: 2px solid var(--accent);
-    padding-left: 8px;
-    margin-top: 2px;
-  }
-
-  .synonyms-list {
+  .synonyms {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 4px;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .synonyms .section-label {
+    width: 100%;
+    margin: 0;
   }
 
   .syn-chip {
-    font-size: 10.5px;
-    background: var(--bg-hover);
+    font-size: 12px;
+    padding: 2px 10px;
+    border-radius: var(--radius-full);
+    background: var(--bg-active);
     color: var(--text-secondary);
-    padding: 2px 7px;
-    border-radius: 4px;
-    border: 1px solid var(--border-subtle);
   }
 
+  .quote {
+    font-family: var(--font-reading);
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    padding-left: 12px;
+    border-left: 3px solid var(--accent);
+  }
+
+  .quote.clamp {
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .passage-actions {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+
+  .passage-btn {
+    height: 34px;
+    gap: 6px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-primary);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+  }
+
+  .passage-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .passage-btn.active {
+    background: var(--accent-subtle);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .mini-spinner {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    animation: spin 0.7s linear infinite;
+  }
+
+  .result {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .result-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .result-badge {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+
+  .link-btn {
+    gap: 4px;
+    padding: 2px 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .link-btn:hover {
+    text-decoration: underline;
+  }
+
+  .ai-text {
+    font-size: 13.5px;
+    line-height: 1.6;
+  }
+
+  .ai-text :global(p.ai-p) {
+    margin-bottom: 6px;
+  }
+
+  .ai-text :global(p.ai-p:last-child) {
+    margin-bottom: 0;
+  }
+
+  .ai-text :global(ul.ai-list) {
+    margin: 4px 0 6px 18px;
+  }
+
+  .ai-text :global(ul.ai-list li) {
+    margin-bottom: 3px;
+  }
+
+  .ai-text :global(strong) {
+    font-weight: 650;
+  }
+
+  .ai-text :global(code) {
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 12px;
+    background: var(--bg-active);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  .ai-text :global(.ai-spacer) {
+    height: 4px;
+  }
+
+  .ai-text :global(.ai-numbered-item) {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 3px;
+  }
+
+  .ai-text :global(.ai-numbered-item .num) {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* Loading */
   .lookup-loading {
     display: flex;
     flex-direction: column;
@@ -1360,378 +1028,334 @@
   }
 
   .shimmer-line {
-    height: 10px;
-    border-radius: 4px;
-    background: linear-gradient(90deg, var(--bg-hover) 25%, var(--border-strong) 50%, var(--bg-hover) 75%);
+    height: 11px;
+    border-radius: 6px;
+    background: linear-gradient(90deg, var(--bg-active) 0%, var(--bg-hover) 50%, var(--bg-active) 100%);
     background-size: 200% 100%;
-    animation: shimmer 1.4s infinite;
+    animation: shimmer 1.3s ease-in-out infinite;
   }
 
-  .shimmer-line.line-1 { width: 90%; }
-  .shimmer-line.line-2 { width: 75%; }
-  .shimmer-line.line-3 { width: 60%; }
-
   @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
   }
 
   .loading-label {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-muted);
     margin-top: 2px;
   }
 
-  .no-key-banner {
+  /* Banners */
+  .banner {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 10px;
-    background: var(--accent-subtle);
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    line-height: 1.5;
   }
 
-  .no-key-banner p {
-    margin: 0;
-    font-size: 11.5px;
-    line-height: 1.4;
+  .banner :global(svg) {
+    margin-top: 2px;
+  }
+
+  .banner.info {
+    background: var(--accent-subtle);
     color: var(--text-primary);
   }
 
-  .btn-setup-key {
-    background: var(--accent);
-    border: none;
-    color: var(--accent-text, #ffffff);
-    padding: 6px 10px;
-    border-radius: 4px;
-    font-size: 11.5px;
-    font-weight: 500;
-    cursor: pointer;
-    text-align: center;
+  .banner.info :global(svg) {
+    color: var(--accent);
   }
 
-  .btn-setup-key:hover {
-    opacity: 0.9;
+  .banner.error {
+    background: var(--danger-subtle);
+    color: var(--text-primary);
   }
 
-  .lookup-error-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+  .banner.error :global(svg) {
+    color: var(--danger);
+  }
+
+  /* Follow-up chat */
+  .chat-section {
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 10px;
+  }
+
+  .chat-toggle {
+    width: 100%;
+    justify-content: flex-start;
     gap: 8px;
-    padding: 6px 10px;
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.25);
-    border-radius: 6px;
+    padding: 4px 0;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
   }
 
-  .lookup-error-banner p {
-    margin: 0;
-    font-size: 11px;
-    color: #ef4444;
+  .chat-toggle span {
+    flex: 1;
+    text-align: left;
   }
 
-  .btn-retry {
-    background: transparent;
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #ef4444;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 10px;
-    cursor: pointer;
+  .chat-toggle:hover,
+  .chat-toggle.expanded {
+    color: var(--text-primary);
   }
 
-  .passage-preview,
-  .context-preview {
+  .mini-chat {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    margin-top: 8px;
   }
 
-  .passage-actions-bar {
+  .quick-chips {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    margin-top: 4px;
   }
 
-  .passage-action-btn {
-    flex: 1 1 auto;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-primary);
-    padding: 6px 10px;
-    border-radius: 6px;
-    font-size: 11.5px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    text-align: center;
-    white-space: nowrap;
+  .chip {
+    height: 28px;
+    padding: 0 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-full);
   }
 
-  .passage-action-btn:hover:not(:disabled) {
-    background: var(--bg-hover);
-    border-color: var(--accent);
+  .chip:hover {
     color: var(--accent);
-  }
-
-  .passage-action-btn.active {
-    background: var(--accent-subtle);
     border-color: var(--accent);
-    color: var(--accent);
-    font-weight: 600;
   }
 
-  .passage-action-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .passage-result-card {
+  .chat-thread {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 10px;
-    background: var(--bg-hover);
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
-    margin-top: 4px;
   }
 
-  .passage-result-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .result-badge {
-    font-size: 10.5px;
-    font-weight: 600;
-    padding: 2px 7px;
-    border-radius: 4px;
-    background: var(--accent-subtle);
-    color: var(--accent);
-    text-transform: capitalize;
-  }
-
-  .result-badge.translate {
-    background: rgba(59, 130, 246, 0.15);
-    color: #3b82f6;
-  }
-
-  .result-badge.summarize {
-    background: rgba(16, 185, 129, 0.15);
-    color: #10b981;
-  }
-
-  .save-passage-note-btn {
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-primary);
-    padding: 2px 8px;
-    font-size: 10.5px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .save-passage-note-btn:hover {
-    background: var(--accent-subtle);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-
-  .passage-result-text {
-    font-size: 12.5px;
+  .chat-bubble {
+    max-width: 92%;
+    padding: 8px 12px;
+    border-radius: 14px;
+    font-size: 13px;
     line-height: 1.55;
-    color: var(--text-primary);
-    white-space: pre-wrap;
-    max-height: 180px;
-    overflow-y: auto;
-    padding-right: 4px;
   }
 
-  .label {
-    font-size: 11px;
+  .chat-bubble.user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: var(--accent-text);
+    border-bottom-right-radius: 4px;
+  }
+
+  .chat-bubble.model {
+    align-self: flex-start;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-bottom-left-radius: 4px;
+  }
+
+  .bubble-action {
+    margin-top: 6px;
+    gap: 4px;
+    padding: 0;
+    font-size: 11.5px;
     color: var(--text-muted);
-    font-weight: 500;
   }
 
-  .quote,
-  .sentence {
-    margin: 0;
-    font-style: italic;
-    line-height: 1.4;
-    color: var(--text-primary);
+  .bubble-action:hover {
+    color: var(--accent);
   }
 
+  .chat-thinking {
+    display: flex;
+    gap: 4px;
+    padding: 8px 12px;
+  }
+
+  .chat-thinking span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    animation: blink 1.2s infinite ease-in-out;
+  }
+
+  .chat-thinking span:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+
+  .chat-thinking span:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+
+  @keyframes blink {
+    0%,
+    80%,
+    100% {
+      opacity: 0.25;
+    }
+    40% {
+      opacity: 1;
+    }
+  }
+
+  .chat-input-bar {
+    display: flex;
+    gap: 6px;
+  }
+
+  .chat-input-bar input {
+    flex: 1;
+    min-width: 0;
+    height: 34px;
+    border-radius: var(--radius-full);
+    padding: 0 14px;
+  }
+
+  .send-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--accent-text);
+    flex-shrink: 0;
+  }
+
+  .send-btn:disabled {
+    background: var(--bg-active);
+    color: var(--text-muted);
+  }
+
+  /* Footer actions */
   .card-actions {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
-    background: var(--bg-surface);
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px 8px 12px;
     border-top: 1px solid var(--border-subtle);
+    background: var(--bg-surface);
+    flex-shrink: 0;
   }
 
-  .btn {
+  .annotate-group {
     display: flex;
     align-items: center;
-    gap: 5px;
-    padding: 5px 10px;
-    border-radius: var(--radius-sm, 6px);
-    font-size: 11.5px;
-    font-weight: 500;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: all 0.15s ease;
+    gap: 1px;
   }
 
-  .btn-primary {
-    background: var(--accent);
-    color: var(--accent-text, #ffffff);
-  }
-
-  .btn-primary:hover:not(:disabled) {
-    opacity: 0.9;
-  }
-
-  .btn-primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .btn-secondary {
-    background: var(--bg-surface-elevated);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-primary);
-  }
-
-  .btn-secondary:hover {
-    background: var(--bg-hover);
-  }
-
-  .btn-ghost {
-    background: transparent;
-    border: none;
+  .mode-toggle {
+    width: 30px;
+    height: 30px;
     color: var(--text-secondary);
-    padding: 5px 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 11.5px;
+    margin-right: 2px;
   }
 
-  .btn-ghost:hover {
-    color: var(--text-primary);
+  .mode-toggle:hover {
     background: var(--bg-hover);
+    color: var(--text-primary);
   }
 
+  .swatch {
+    width: 26px;
+    height: 30px;
+    padding: 0;
+    position: relative;
+  }
+
+  .swatch::before {
+    content: "";
+    position: absolute;
+    left: 5px;
+    right: 5px;
+    top: 8px;
+    bottom: 8px;
+    border-radius: 50%;
+    background: var(--c);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+    transition: transform var(--transition-fast);
+  }
+
+  .swatch.underline::before {
+    top: auto;
+    bottom: 9px;
+    height: 3px;
+    border-radius: 2px;
+    box-shadow: none;
+  }
+
+  .swatch:hover::before {
+    transform: scale(1.2);
+  }
+
+  .action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+  }
+
+  .save-btn {
+    height: 30px;
+    padding: 0 12px;
+    margin-left: 4px;
+    font-size: 12.5px;
+    font-weight: 600;
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+
+  .save-btn:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
+  .save-btn.saved {
+    background: var(--success-subtle);
+    color: var(--success);
+  }
+
+  /* Note composer */
   .quick-note {
-    padding: 12px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
+    padding: 4px 16px 14px;
   }
 
-  .quote-preview {
-    font-size: 11px;
-    color: var(--text-secondary);
-    font-style: italic;
-    max-height: 40px;
+  .quick-note .quote {
+    font-size: 13px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
-    border-left: 2px solid var(--accent);
-    padding-left: 6px;
   }
 
   .quick-note textarea {
-    width: 100%;
-    padding: 8px 10px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm, 6px);
-    color: var(--text-primary);
-    font-size: 12px;
-    outline: none;
-    box-sizing: border-box;
-    resize: none;
-  }
-
-  .quick-note textarea:focus {
-    border-color: var(--accent);
+    resize: vertical;
+    min-height: 84px;
+    line-height: 1.5;
   }
 
   .note-actions {
     display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-
-  /* Annotation Palette Swatches */
-  .annotation-palette-group {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding-left: 4px;
-    border-left: 1px solid var(--border-subtle);
-    margin-left: 2px;
-  }
-
-  .mini-palette-row {
-    display: flex;
     align-items: center;
     gap: 6px;
   }
 
-  .mini-palette-label {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
+  .note-actions .hint {
+    flex: 1;
+    font-size: 11.5px;
     color: var(--text-muted);
-  }
-
-  .palette-swatches {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .palette-swatch {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    cursor: pointer;
-    padding: 0;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-  }
-
-  .palette-swatch:hover {
-    transform: scale(1.3);
-    box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
-  }
-
-  .palette-swatch.underline-swatch {
-    background: transparent;
-    border-radius: 2px;
-    height: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-  }
-
-  @media (max-width: 480px) {
-    .card-actions {
-      flex-wrap: wrap;
-    }
-    .annotation-palette-group {
-      width: 100%;
-      border-left: none;
-      border-top: 1px solid var(--border-subtle);
-      padding-top: 6px;
-      margin-left: 0;
-    }
   }
 </style>
